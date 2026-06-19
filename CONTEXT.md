@@ -1,6 +1,6 @@
 # CONTEXT.md
 
-This repository is currently documentation-first. There is no implemented `deployctl` source tree, tenant registry, migrations, package manifest, test suite, or build configuration yet.
+This repository started documentation-first and now has the first safe Phase 1 CLI scaffold. There is no tenant registry, deploy implementation, migrations, remote script, or pipeline configuration yet.
 
 Use this file as the short project context for future work. Treat architecture details below as the current proposed direction from `docs/initial-architecture-proposal.md`, not as verified runtime behavior.
 
@@ -16,15 +16,21 @@ Version 1 is scoped to deployment automation on top of existing AWS infrastructu
 
 ## Current Repository State
 
-Implemented code: none yet.
+Implemented code: minimal Phase 1 TypeScript CLI scaffold.
 
 Current files:
 
 - `AGENTS.md`: agent guidance for working in this repo.
 - `CONTEXT.md`: this file, optimized as quick context for coding agents.
 - `docs/initial-architecture-proposal.md`: primary architecture proposal and decisions.
+- `docs/implementation-plan.md`: phased implementation tracker and current phase status.
 - `docs/multi-tenant-deployment-explainer.md`: beginner-friendly explanation of the no-Docker deployment model.
 - `docs/review-questions.md`: reviewer Q&A and open implementation questions.
+- `package.json`: Node package manifest with test and typecheck scripts.
+- `package-lock.json`: npm lockfile.
+- `tsconfig.json`: TypeScript configuration.
+- `src/cli.ts`: minimal CLI entrypoint with help output and non-implemented command fallback.
+- `test/cli-help.test.ts`: public CLI behavior test for help output.
 
 Generated/local files currently present and not meaningful for project design:
 
@@ -179,7 +185,12 @@ Rules:
 
 ## Patterns And Conventions
 
-Confirmed implemented patterns: none yet.
+Confirmed implemented patterns:
+
+- Use TypeScript with Node.js ESM.
+- Use Node's built-in test runner via `node --import tsx --test`.
+- CLI behavior tests should invoke the public CLI entrypoint with `spawnSync`, not private functions.
+- Non-implemented commands should fail clearly without AWS side effects.
 
 Expected implementation conventions from the proposal:
 
@@ -212,14 +223,18 @@ Suggested future module seams, once code exists:
 Current paths:
 
 - `docs/initial-architecture-proposal.md`: authoritative proposal for version 1 behavior and decisions.
+- `docs/implementation-plan.md`: phase tracker for implementation progress.
 - `docs/multi-tenant-deployment-explainer.md`: explanatory companion for the same architecture.
 - `docs/review-questions.md`: open questions and manager/reviewer-ready answers.
 - `AGENTS.md`: local instructions for agents; points agents to the architecture proposal.
 - `CONTEXT.md`: concise project context and implementation guardrails.
+- `src/cli.ts`: CLI entrypoint.
+- `test/cli-help.test.ts`: CLI help behavior test.
+- `package.json`: npm scripts and package metadata.
+- `tsconfig.json`: TypeScript compiler settings.
 
 Proposed paths from the architecture, not yet created:
 
-- `deployctl/`: TypeScript CLI implementation.
 - `tenants.yml`: tenant registry with environment/tenant resource mappings.
 - `bitbucket-pipelines.yml`: pipeline entry points for invoking the CLI.
 - `scripts/`: small remote scripts, especially EC2-local commands invoked through SSM.
@@ -236,7 +251,13 @@ Proposed runtime paths, not repository paths:
 
 ## Exact Commands
 
-No package manager, test runner, Makefile, or executable CLI exists yet, so there are no verified local commands.
+Verified local development commands:
+
+```bash
+npm test
+npm run typecheck
+node --import tsx src/cli.ts --help
+```
 
 Proposed operator commands from the architecture:
 
@@ -261,10 +282,7 @@ When implementation begins, update this section with exact verified commands, su
 
 Repository gaps:
 
-- No TypeScript project scaffold exists yet.
-- No package manager choice is recorded in code.
-- No source files exist yet.
-- No tests exist yet.
+- Only the minimal TypeScript CLI scaffold exists.
 - No tenant registry exists yet.
 - No deploy scripts exist yet.
 - No Bitbucket pipeline config exists yet.

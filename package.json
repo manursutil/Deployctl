@@ -1,0 +1,24 @@
+{
+  "name": "deployctl",
+  "version": "1.0.0",
+  "description": "CLI-first deployment automation for multi-tenant application releases.",
+  "bin": {
+    "deployctl": "./src/cli.ts"
+  },
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "node --import tsx --test test/**/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "UNLICENSED",
+  "type": "module",
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
+  }
+}
