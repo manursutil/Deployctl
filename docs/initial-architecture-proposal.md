@@ -22,6 +22,8 @@ Version 1 includes:
 - Status and logs commands.
 - Documentation for deploy, rollback, troubleshooting, and tenant config.
 
+A web dashboard is now a confirmed requirement, but it is sequenced as a later phase built on top of the CLI's orchestration modules rather than part of the initial CLI delivery. See section 6a.
+
 Version 1 does not include:
 
 - Terraform changes.
@@ -29,7 +31,6 @@ Version 1 does not include:
 - Database provisioning.
 - DNS or Cloudflare changes.
 - Docker, Kubernetes, ECS, or ECR-based deploys.
-- A web dashboard.
 - Automatic rollback.
 - Database migration automation.
 
@@ -157,41 +158,87 @@ Keeping those separate reduces confusion. A developer working on application fea
 
 The main tradeoff is coordination. The deployment repo must know how to fetch the app repo and build a selected commit. That is a small amount of extra setup, but it gives cleaner ownership and better security boundaries.
 
-## 6. Main Decision: CLI-Only Version 1
+## 6. Main Decision: CLI-First Version 1, Dashboard Built On The Same Modules
 
-Version 1 should be CLI-only. A dashboard should not be part of the initial implementation.
+Version 1 implementation starts CLI-only. A dashboard is now a confirmed requirement, but it is sequenced after the CLI's orchestration modules exist, not built in parallel with them.
 
 Why:
 
-The brief says CLI is required and a dashboard is optional. A dashboard adds a new web-facing surface, authentication, authorization, network exposure, and audit requirements. For a healthcare platform, this is not a small addition.
+A dashboard adds a new web-facing surface, authentication, authorization, network exposure, and audit requirements. For a healthcare platform, this is not a small addition. It is also impossible to build correctly before the deploy/rollback/lock/history logic it depends on exists, since the dashboard does not reimplement that logic — it calls it.
 
 Pros:
 
-- Simpler.
-- Lower security risk.
-- Faster to build and review.
-- Easier to audit using IAM, CloudTrail, SSM command history, Bitbucket logs, and deploy history.
-- Keeps the dashboard possible later because it can be built on top of the same CLI workflows.
+- Simpler to get the deploy mechanism correct first, without two consumers in flux at once.
+- Lower security risk during the highest-uncertainty phase of the project.
+- Easier to audit using IAM, CloudTrail, SSM command history, Bitbucket logs, and deploy history while the CLI is the only entry point.
+- The dashboard becomes a thin layer once it starts, because the hard problems (locking, history, ref resolution, deploy/rollback) are already solved.
 
 Cons:
 
-- Less friendly for non-technical operators.
-- Requires good documentation.
-- Branch selection and status checks happen through terminal commands.
+- The dashboard requirement is delayed relative to when it was requested.
+- Operators without CLI comfort have to wait for the dashboard phase.
+- Branch selection and status checks happen through terminal commands until then.
 
 Decision:
 
-> Version 1 is CLI-only. A dashboard can be proposed later as an optional layer after the CLI deploy path is proven.
+> Version 1 implementation is CLI-first. The web dashboard is a confirmed but later phase, built once tenant registry, ref resolution, deploy history/current-state, locking, backend deploy, frontend deploy, rollback, and status/logs orchestration modules exist and are stable. See section 6a for the dashboard design.
 
 Beginner explanation:
 
-A dashboard sounds convenient, but it is also a new application that can trigger production deploys. That means it needs authentication, authorization, network restrictions, audit logs, and careful security review.
+A dashboard is also a new application that can trigger production deploys. That means it needs authentication, authorization, network restrictions, audit logs, and careful security review.
 
 The CLI is simpler because it can run inside Bitbucket Pipelines or on an operator machine using AWS IAM permissions. The security boundary is mostly AWS IAM plus Bitbucket access control.
 
-In version 1, the important thing is to make the deploy mechanism correct. A dashboard can be added later if the organization wants a friendlier interface. If that happens, the dashboard should call the same deploy logic instead of inventing a second deployment path.
+In version 1, the important thing is to make the deploy mechanism correct first. The dashboard calls the same deploy logic instead of inventing a second deployment path.
 
 This avoids a common mistake: building a UI before the underlying deploy workflow is reliable.
+
+## 6a. Main Decision: Web Dashboard Design
+
+A web dashboard is required, requested directly by the project owner, for deploy actions (backend and frontend deploy) and visibility (status). It is scoped initially for a single user (the project owner) but built with the same guardrails a multi-user dashboard would need, since access is expected to expand later.
+
+Architecture:
+
+```text
+deployctl CLI        -> orchestration modules (tenant registry, ref resolution,
+Web dashboard         ->   deploy history/current-state, locking, backend/frontend
+                           deploy, rollback, status)
+```
+
+The dashboard is not a wrapper that shells out to the `deployctl` binary. It imports and calls the same TypeScript orchestration modules the CLI's thin command handlers call. This matches the existing convention that CLI commands are thin controllers over orchestration modules (see `CONTEXT.md`): the dashboard is a second thin controller over the same modules, not a second deployment path.
+
+Scope for the first dashboard phase:
+
+- Backend deploy and frontend deploy actions.
+- Status visibility (current deployed version per tenant/app).
+- The in-progress guardrail (see below).
+
+Explicitly deferred to a later phase:
+
+- Rollback through the dashboard.
+- Logs through the dashboard.
+
+Why defer rollback and logs: rollback benefits from deploy-history context that is easier to review in a CLI/terminal session than to rush into a first UI pass, and CloudWatch's own console remains a working fallback for logs in the meantime.
+
+Concurrency guardrail:
+
+The project owner does not want a DynamoDB or S3 lock store for this dashboard. Because the dashboard is the only entry point he uses, and because adding new lock infrastructure is disproportionate to a single-user tool, the guardrail is a lightweight `inProgress`/`since` field added to the existing `current.json` current-state record (section 23), checked and set by the orchestration module itself before starting a deploy. This is visible to any caller of the orchestration module, including the CLI, even though only the dashboard is used in practice. It is scoped per `<env>/<tenant>/<app>`, matching the existing key structure, so an in-progress deploy for one tenant/app does not block unrelated deploys.
+
+This intentionally narrows the original deployment-lock decision in section 22 for this project: DynamoDB and S3 lock objects are not used. The `inProgress` field is a lighter-weight mechanism that solves the same problem (preventing a second deploy from starting against the same target) given a single-user dashboard as the only real caller.
+
+Auth and access:
+
+- Auth: basic auth or a single shared secret stored in Secrets Manager. Not Google SSO, not a full identity provider, since this is a single-user tool for now.
+- Network restriction: the dashboard should not be reachable without restriction, given it can trigger production deploys for a healthcare platform. The exact mechanism is open — see Known Gaps in `CONTEXT.md`. A Google Identity-Aware Proxy (IAP) style network/access gate was mentioned but not confirmed; an IP-allowlisted security group is the fallback if IAP does not apply.
+- Audit logging: every dashboard-triggered deploy or rollback should be recorded in the existing deploy-history event record (section 23), with `deployedBy` populated with the authenticated identity rather than a generic value like `"bitbucket-pipelines"`.
+
+Hosting: the dashboard should run on its own compute, separate from the tenant-serving ASG/EC2 instances, so a dashboard issue or compromise does not share fate with tenant-facing production traffic. The exact hosting target (small dedicated instance vs. something else) is not yet confirmed.
+
+Tech stack: a small server-rendered app (for example Express or Fastify with a lightweight templating engine or htmx for incremental interactivity), not a full SPA framework. The CLI and the rest of this project are deliberately small TypeScript tooling; the dashboard should match that, since it serves a single user today. A framework like Next.js was considered and rejected for v1 as disproportionate to the current need.
+
+Decision:
+
+> Build the web dashboard as a thin server-rendered TypeScript app in the same repository, calling the same orchestration modules as `deployctl`. Scope v1 to backend/frontend deploy and status, with rollback and logs deferred. Use a lightweight `inProgress` field on `current.json` instead of DynamoDB or S3 locks. Require basic auth/shared secret plus a network restriction, and record the authenticated identity in deploy history. Hosting location and the exact network-restriction mechanism remain open questions to confirm.
 
 ## 7. Main Decision: TypeScript CLI
 
@@ -1156,6 +1203,8 @@ This is why deploy history and retention are important. The tool needs to know w
 
 ## 22. Deployment Locks
 
+Note: section 6a narrows this decision for the dashboard's single-user concurrency guardrail, using an `inProgress` field on `current.json` instead of DynamoDB or S3 locks. This section's analysis still applies to the CLI/pipeline-driven locking model described here.
+
 Version 1 should prevent two deploys or rollbacks from changing the same tenant application at the same time.
 
 The lock should be specific to one deployment target:
@@ -1650,7 +1699,8 @@ The EC2 instance role needs:
 
 Good future enhancements:
 
-- Optional dashboard with dedicated security assessment.
+- Dashboard support for rollback and logs (deferred from the v1 dashboard scope in section 6a).
+- Multi-user dashboard access with a stronger identity/authorization model, if access expands beyond the project owner.
 - Automatic rollback after partial production deploy failure.
 - Database migration command with tenant-safe guardrails.
 - Rolling production deploys instance by instance.
@@ -1678,6 +1728,7 @@ The freelancer should deliver:
 10. Rollback commands.
 11. Status and CloudWatch logs commands.
 12. Operator documentation for deploy, rollback, troubleshooting, and tenant config updates.
+13. Web dashboard (deploy actions and status) as a later phase, per section 6a, built once the items above are stable.
 
 ## 30. One-Sentence Summary
 

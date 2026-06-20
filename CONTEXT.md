@@ -1,6 +1,6 @@
 # CONTEXT.md
 
-This repository started documentation-first and now has the first safe Phase 1 CLI scaffold. There is no tenant registry, deploy implementation, migrations, remote script, or pipeline configuration yet.
+This repository is documentation-first: it currently contains only docs and agent guidance, with no code yet. There is no CLI scaffold, tenant registry, deploy implementation, migrations, remote script, or pipeline configuration.
 
 Use this file as the short project context for future work. Treat architecture details below as the current proposed direction from `docs/initial-architecture-proposal.md`, not as verified runtime behavior.
 
@@ -16,7 +16,7 @@ Version 1 is scoped to deployment automation on top of existing AWS infrastructu
 
 ## Current Repository State
 
-Implemented code: minimal Phase 1 TypeScript CLI scaffold.
+Implemented code: none. The repo is docs-only and starting fresh against the current implementation plan.
 
 Current files:
 
@@ -25,17 +25,6 @@ Current files:
 - `docs/initial-architecture-proposal.md`: primary architecture proposal and decisions.
 - `docs/implementation-plan.md`: phased implementation tracker and current phase status.
 - `docs/multi-tenant-deployment-explainer.md`: beginner-friendly explanation of the no-Docker deployment model.
-- `docs/review-questions.md`: reviewer Q&A and open implementation questions.
-- `package.json`: Node package manifest with test and typecheck scripts.
-- `package-lock.json`: npm lockfile.
-- `tsconfig.json`: TypeScript configuration.
-- `src/cli.ts`: minimal CLI entrypoint with help output and non-implemented command fallback.
-- `test/cli-help.test.ts`: public CLI behavior test for help output.
-
-Generated/local files currently present and not meaningful for project design:
-
-- `.DS_Store`
-- `docs/.DS_Store`
 
 ## Architecture
 
@@ -77,7 +66,8 @@ deployctl
 Important architectural rules:
 
 - `deployctl` should be a small TypeScript CLI running on Node.js.
-- Version 1 is CLI-only. Do not add a dashboard unless explicitly requested.
+- A web dashboard is a confirmed requirement (requested by the project owner), but it is sequenced after the CLI's orchestration modules (tenant registry, ref resolution, history, the `inProgress` guardrail, backend/frontend deploy, rollback, status/logs) are done. See `docs/initial-architecture-proposal.md` section 6a and `docs/implementation-plan.md` Phase 15. Do not start the dashboard before those modules exist and are directly importable.
+- The dashboard must call the same orchestration modules as the CLI, not wrap or shell out to the `deployctl` binary.
 - Deployment orchestration, validation, AWS SDK calls, history, and user-facing errors belong in TypeScript.
 - Shell should be limited to small EC2-local scripts invoked through SSM.
 - Backend deploys are commit-based release directories, not a single mutable Git checkout.
@@ -92,11 +82,11 @@ Common deploy flow:
 1. Operator or Bitbucket Pipeline invokes `deployctl` with tenant, environment, app, and ref.
 2. `deployctl` validates inputs against tenant configuration.
 3. `deployctl` resolves branch/tag/SHA input to a full commit SHA before doing deployment work.
-4. `deployctl` acquires a deployment lock for `<env>/<tenant>/<app>`.
+4. `deployctl` checks and sets the `inProgress` guardrail on `current.json` for `<env>/<tenant>/<app>`.
 5. `deployctl` executes the backend or frontend deploy path.
 6. `deployctl` runs a health or smoke check.
 7. `deployctl` writes append-only deploy history and updates current desired state.
-8. `deployctl` releases the deployment lock.
+8. `deployctl` clears the `inProgress` guardrail on completion or failure.
 
 Backend-specific flow:
 
@@ -136,8 +126,7 @@ The current proposed operational domain model is:
 - Frontend artifact: static build output stored by commit SHA and reusable across tenants.
 - Tenant frontend bucket: tenant-specific S3 bucket receiving the deployed frontend files.
 - Deploy event: append-only JSON record of a deploy, rollback, failure, or partial failure.
-- Current state: mutable JSON record describing the desired/current version for one tenant/app.
-- Deployment lock: coordination record keyed by `<env>/<tenant>/<app>`.
+- Current state: mutable JSON record describing the desired/current version for one tenant/app, including the `inProgress`/`since` concurrency guardrail.
 
 No primary keys, foreign keys, or cascade rules exist yet because there is no persisted relational schema in this repo.
 
@@ -145,8 +134,7 @@ Proposed storage relationships:
 
 - Tenant config maps `environment + tenant` to AWS resources and runtime names.
 - Deploy history stores events under `environment + tenant + app`.
-- Current state is one record per `environment + tenant + app`.
-- Deployment locks are keyed by `environment + tenant + app`.
+- Current state is one record per `environment + tenant + app`, and carries the `inProgress` guardrail for that key.
 - Backend releases are keyed by commit SHA and may be shared by many tenants.
 - Frontend artifacts are keyed by commit SHA and may be shared by many tenants.
 
@@ -185,7 +173,7 @@ Rules:
 
 ## Patterns And Conventions
 
-Confirmed implemented patterns:
+Intended patterns (none implemented yet; establish these as code is written):
 
 - Use TypeScript with Node.js ESM.
 - Use Node's built-in test runner via `node --import tsx --test`.
@@ -211,12 +199,14 @@ Suggested future module seams, once code exists:
 - CLI command parsing.
 - Tenant config loading and validation.
 - Git/Bitbucket ref resolution.
-- Deployment locking.
+- Concurrency guardrail (`inProgress`/`since` on `current.json`).
 - Deploy history/current-state repository.
 - Backend SSM deployment orchestration.
 - Frontend artifact and S3 sync orchestration.
 - Status and logs queries.
 - Rollback orchestration.
+
+These modules must stay directly importable/callable independent of `process.argv` and stdout, since the planned web dashboard (Phase 15) will call them in-process rather than through the CLI binary.
 
 ## File Paths With Purpose
 
@@ -225,20 +215,17 @@ Current paths:
 - `docs/initial-architecture-proposal.md`: authoritative proposal for version 1 behavior and decisions.
 - `docs/implementation-plan.md`: phase tracker for implementation progress.
 - `docs/multi-tenant-deployment-explainer.md`: explanatory companion for the same architecture.
-- `docs/review-questions.md`: open questions and manager/reviewer-ready answers.
 - `AGENTS.md`: local instructions for agents; points agents to the architecture proposal.
 - `CONTEXT.md`: concise project context and implementation guardrails.
-- `src/cli.ts`: CLI entrypoint.
-- `test/cli-help.test.ts`: CLI help behavior test.
-- `package.json`: npm scripts and package metadata.
-- `tsconfig.json`: TypeScript compiler settings.
 
-Proposed paths from the architecture, not yet created:
+Proposed paths from the architecture, not yet created (see the target repo structure in `docs/implementation-plan.md`):
 
+- `src/`: TypeScript CLI entrypoint, command controllers, core orchestration modules, and AWS adapters.
+- `test/`: public-behavior-first tests mirroring `src/`.
+- `package.json`, `tsconfig.json`: Node package metadata and TypeScript configuration.
 - `tenants.yml`: tenant registry with environment/tenant resource mappings.
 - `bitbucket-pipelines.yml`: pipeline entry points for invoking the CLI.
 - `scripts/`: small remote scripts, especially EC2-local commands invoked through SSM.
-- `docs/`: operator docs for deploy, rollback, troubleshooting, and tenant config.
 
 Proposed runtime paths, not repository paths:
 
@@ -251,7 +238,7 @@ Proposed runtime paths, not repository paths:
 
 ## Exact Commands
 
-Verified local development commands:
+No code exists yet, so there are no verified local development commands. The intended commands once the Phase 1 scaffold lands (record them here as verified when they work):
 
 ```bash
 npm test
@@ -272,8 +259,6 @@ deployctl logs --tenant client1 --env production --service api --since 1h
 deployctl reconcile backend --env production
 deployctl cleanup releases --env production --dry-run
 deployctl cleanup artifacts --env production --dry-run
-deployctl locks list --env production
-deployctl locks unlock production/client1/backend --force
 ```
 
 When implementation begins, update this section with exact verified commands, such as install, lint, typecheck, unit tests, integration tests, and CLI smoke tests.
@@ -282,7 +267,7 @@ When implementation begins, update this section with exact verified commands, su
 
 Repository gaps:
 
-- Only the minimal TypeScript CLI scaffold exists.
+- No code exists yet; the repo is docs-only.
 - No tenant registry exists yet.
 - No deploy scripts exist yet.
 - No Bitbucket pipeline config exists yet.
@@ -292,13 +277,14 @@ Repository gaps:
 Architecture and implementation open questions:
 
 - Confirm existing production ASG bootstrap behavior for replacement instances.
-- Decide whether deployment locks use DynamoDB conditional writes or S3 lock objects.
 - Choose exact deploy history S3 bucket or prefix.
 - Define final least-privilege IAM policies.
 - Define the runbook for releases that require manual database migrations.
 - Confirm CloudWatch log group and stream naming conventions for tenant/process filtering.
 - Confirm whether frontend tenant config is runtime config or currently baked into the JS bundle.
 - Define exact artifact retention and cleanup implementation.
+- Confirm the dashboard's network restriction mechanism: possibly Google Identity-Aware Proxy (IAP), mentioned by the project owner but not confirmed; IP-allowlisted security group is the fallback.
+- Confirm the dashboard's hosting target: likely a small dedicated instance separate from the tenant-serving ASG/EC2 instances, not yet confirmed.
 
 Intentional version 1 non-goals:
 
@@ -307,9 +293,10 @@ Intentional version 1 non-goals:
 - No database provisioning.
 - No DNS or broad Cloudflare infrastructure changes.
 - No Docker, Kubernetes, ECS, or ECR-based deployment path.
-- No web dashboard.
 - No automatic rollback.
 - No database migration automation.
+- No dashboard rollback or logs support in the first dashboard phase (deferred, see Phase 15 in `docs/implementation-plan.md`).
+- No DynamoDB or S3 lock store for the dashboard guardrail; see Phase 5 in `docs/implementation-plan.md`.
 
 ## Security Notes
 
@@ -320,3 +307,4 @@ Intentional version 1 non-goals:
 - Operators should not need SSH keys for normal backend deploys.
 - Logs should come from CloudWatch.
 - IAM should be scoped to the minimum required actions.
+- The web dashboard (Phase 15) needs basic auth or a shared secret from Secrets Manager, a network restriction, and audit logging of the authenticated identity into deploy history (`deployedBy`). It must not be reachable without restriction, since it can trigger production deploys.

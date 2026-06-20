@@ -147,6 +147,8 @@ Both humans and Bitbucket Pipelines can use it.
 
 That matters because there should be one deployment system, not separate manual and CI deployment systems.
 
+A web dashboard is also planned, for deploy actions and status visibility. It will call the same underlying deploy logic as the CLI instead of being a separate way to deploy. See `docs/initial-architecture-proposal.md` section 6a for the dashboard design.
+
 ## 6. tenants.yml
 
 `tenants.yml` is the map of tenants to AWS resources and runtime names.

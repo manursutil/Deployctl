@@ -2,6 +2,40 @@
 
 This document tracks implementation phases for `deployctl` based on `docs/initial-architecture-proposal.md`.
 
+## Target Repo Structure
+
+Target layout (aspirational — no code exists yet; the repo currently contains only `docs/`, `AGENTS.md`, and `CONTEXT.md`). Files are flat to start; split a module into a folder only when it grows. The load-bearing split is `commands/` (and later `dashboard/`) as thin controllers over a shared `core/` library, with AWS access isolated in `adapters/` so `core/` stays unit-testable. This is what lets the dashboard be a second thin caller of the same modules rather than a fork (proposal §6/6a).
+
+```
+src/
+  cli.ts                # entry: arg parsing -> dispatch to commands/   (Phase 1)
+  commands/             # thin CLI controllers, one per command
+    tenants.ts          #   deployctl tenants list                     (Phase 2)
+    deploy.ts           #   deployctl deploy backend|frontend          (Phases 6-7)
+    rollback.ts         #   deployctl rollback                         (Phase 8)
+    status.ts           #   deployctl status                           (Phase 9)
+    logs.ts             #   deployctl logs                             (Phase 9)
+    reconcile.ts        #   deployctl reconcile backend                (Phase 10)
+    cleanup.ts          #   deployctl cleanup                          (Phase 11)
+  core/                 # orchestration modules — the shared library
+    tenants.ts          #   load + validate tenants.yml                (Phase 2)
+    refs.ts             #   git ref -> immutable commit SHA            (Phase 3)
+    history.ts          #   deploy events + current.json               (Phase 4)
+    guardrail.ts        #   inProgress/since check + set               (Phase 5)
+    deploy.ts           #   backend + frontend orchestration           (Phases 6-7)
+    rollback.ts         #   version selection + redeploy               (Phase 8)
+    diagnostics.ts      #   status + logs queries                      (Phase 9)
+    cleanup.ts          #   retention logic                            (Phase 11)
+  adapters/             # thin wrappers over AWS SDK + git (mockable in tests)
+    ssm.ts  s3.ts  secrets.ts  cloudwatch.ts  git.ts
+  shared.ts             # output formatting, errors, config types
+scripts/
+  ec2/                  # server-local shell run via SSM (proposal §7)
+dashboard/              # later — Phase 15, second controller over core/
+test/                   # mirrors src/, public-behavior-first
+tenants.yml             # tenant registry config                       (Phase 2)
+```
+
 Status legend:
 
 - `Not started`: no implementation work yet.
@@ -9,11 +43,26 @@ Status legend:
 - `Blocked`: waiting on a decision or external dependency.
 - `Done`: implemented and verified.
 
+Each phase is `Done` only when its public behavior (a CLI command or module contract) has a passing test and `npm test` plus `npm run typecheck` run clean. Phases that expose a public command carry a `Done when:` line stating the exact observable behavior to verify; phases whose command surface is not yet decided add theirs once it is.
+
+## Phase Dependencies
+
+High-level order (details in each phase):
+
+- Phase 0 (discovery) precedes all AWS-facing work.
+- Phases 2-5 (tenant registry, ref resolution, deploy history/current-state, the guardrail) are shared foundations — see "Deploy Prerequisites" — and must land before Phases 6-7 (backend/frontend deploy).
+- Phase 5 (guardrail) builds on the Phase 4 current-state schema.
+- Phase 8 (rollback) depends on Phases 4, 6, 7.
+- Phase 10 (ASG reconciliation) is blocked on Phase 0 ASG-bootstrap discovery.
+- Phase 15 (dashboard) requires Phases 2-9 done; it calls the same modules.
+
 ## Phase 0: Discovery And Decisions
 
 Status: `Not started`
 
 Goal: confirm infrastructure assumptions before concrete AWS-facing implementation.
+
+Record each confirmed answer in `CONTEXT.md` (and update the relevant section of `docs/initial-architecture-proposal.md` when an answer changes a documented assumption). A task is not "confirmed" until its answer is written down there.
 
 Tasks:
 
@@ -26,38 +75,28 @@ Tasks:
 - Confirm authoritative backend and frontend package managers and build commands.
 - Confirm whether backend native dependencies must be installed and built on EC2.
 - Confirm frontend build and runtime config model.
-- Decide DynamoDB locks vs S3 lock fallback.
+- Note: concurrency is handled by an `inProgress` field on `current.json`, not DynamoDB or S3 locks (decided; see Phase 5).
 - Choose deploy history and artifact S3 buckets or prefixes.
 - Define least-privilege IAM requirements.
 
 ## Phase 1: CLI Foundation
 
-Status: `In progress`
+Status: `Not started`
 
-Goal: create a safe TypeScript CLI scaffold with no AWS side effects.
+Goal: create a safe TypeScript CLI scaffold with no AWS side effects, starting from an empty repo (only `docs/`, `AGENTS.md`, and `CONTEXT.md` exist).
 
-Completed:
+Tasks:
 
-- Added npm package scaffold.
-- Added TypeScript configuration.
-- Added minimal CLI entrypoint at `src/cli.ts`.
-- Added one public CLI behavior test for `--help`.
-- Added verified commands to `CONTEXT.md`.
-
-Remaining:
-
+- Add npm package scaffold and TypeScript configuration.
+- Add a minimal CLI entrypoint at `src/cli.ts`.
+- Add one public CLI behavior test (for example `--help`).
 - Add command parser structure when the next public behavior is chosen.
 - Add shared output and error conventions.
 - Add thin command handlers that fail clearly until implemented.
 - Keep implementation behind stable interfaces where Phase 0 decisions are still open.
+- Record verified commands (test, typecheck, CLI invocation) in `CONTEXT.md`.
 
-Verified commands:
-
-```bash
-npm test
-npm run typecheck
-node --import tsx src/cli.ts --help
-```
+Done when: `npm test` and `npm run typecheck` run clean and `deployctl --help` prints usage, covered by a test.
 
 ## Phase 2: Tenant Registry
 
@@ -73,6 +112,8 @@ Tasks:
 - Validate required resource references.
 - Reject likely secret values in config.
 - Implement `deployctl tenants list --env <env>`.
+
+Done when: `deployctl tenants list --env staging` prints the configured tenants for a valid config, and exits non-zero with a clear message on an invalid or missing config, both covered by a test.
 
 ## Phase 3: Git Ref Resolution
 
@@ -102,31 +143,24 @@ Tasks:
 - Read and update `current.json`.
 - Support previous-version lookup for rollback.
 
-## Phase 5: Deployment Locks
+## Phase 5: Deployment Guardrail
 
-Status: `Blocked`
-
-Blocked by: DynamoDB vs S3 lock decision from Phase 0.
+Status: `Not started`
 
 Goal: prevent concurrent deploys or rollbacks for the same `<env>/<tenant>/<app>` target.
 
+Decision: no DynamoDB and no S3 lock objects. Use a lightweight `inProgress`/`since` field on the `current.json` current-state record from Phase 4, checked and set by the orchestration module before starting a deploy or rollback. This is visible to any caller of the orchestration module (CLI or future dashboard), scoped per `<env>/<tenant>/<app>`. See `docs/initial-architecture-proposal.md` section 6a.
+
 Tasks:
 
-- Define lock interface.
-- Implement DynamoDB conditional-write lock, or approved S3 fallback.
-- Add lock expiry metadata.
-- Add stale lock reporting.
-- Implement `locks list` and `locks unlock`.
+- Add `inProgress`/`since` fields to the current-state schema (Phase 4).
+- Check and set the guardrail at the start of deploy/rollback orchestration; clear it on completion or failure.
+- Surface a clear "deploy already in progress" error when blocked.
+- Document that this narrows the DynamoDB/S3 lock design in the architecture proposal section 22, given a single-user dashboard as the primary caller.
 
 ## Deploy Prerequisites
 
-Backend and frontend deploy commands must not ship until these shared foundations are implemented and wired into the deploy flow:
-
-- Tenant registry loading and validation.
-- Git ref resolution to an immutable full commit SHA.
-- Deploy history and current-state writes.
-- Deployment locks for `<env>/<tenant>/<app>`.
-- Clear failure behavior for validation, lock acquisition, deploy execution, and history updates.
+Backend and frontend deploy commands (Phases 6-7) must not ship until the shared foundations of Phases 2-5 are implemented and wired into the deploy flow: tenant registry, ref resolution, deploy history/current-state, and the `inProgress` guardrail. In addition, the deploy flow must fail clearly and leave no partial state on any of: config validation, guardrail conflict, deploy execution, or history update.
 
 ## Phase 6: Backend Deploy
 
@@ -188,6 +222,8 @@ Tasks:
 - Filter logs by environment, tenant, service, and time range.
 - Show SSM command IDs and per-instance results where relevant.
 
+Done when: `deployctl status` reports current state per `<env>/<tenant>/<app>` and `deployctl logs` returns filtered CloudWatch entries for a given env/tenant/service, both covered by a test (live AWS calls mocked).
+
 ## Phase 10: ASG Replacement And Reconciliation
 
 Status: `Blocked`
@@ -230,20 +266,16 @@ Tasks:
 
 ## Phase 13: Testing And Validation
 
-Status: `In progress`
+Status: `Not started`
 
 Goal: grow tests vertically with implementation, avoiding broad speculative test suites.
-
-Current test coverage:
-
-- CLI help output through public CLI process invocation.
 
 Future validation areas:
 
 - Tenant config behavior.
 - Ref resolution rules.
 - History behavior.
-- Lock behavior.
+- Guardrail (`inProgress`) behavior.
 - Backend deploy failure handling.
 - Frontend cache header behavior.
 - Rollback version selection.
@@ -259,7 +291,6 @@ Current docs:
 - `AGENTS.md`
 - `docs/initial-architecture-proposal.md`
 - `docs/multi-tenant-deployment-explainer.md`
-- `docs/review-questions.md`
 - `docs/implementation-plan.md`
 - `CONTEXT.md`
 
@@ -275,3 +306,36 @@ Future docs:
 - Troubleshooting guide.
 - Tenant config update guide.
 - Security and IAM notes.
+
+## Phase 15: Web Dashboard
+
+Status: `Not started`
+
+Blocked by: Phases 2-9 (tenant registry, ref resolution, deploy history/current-state including the Phase 5 guardrail, backend deploy, frontend deploy, rollback, status/logs) must be `Done` first. The dashboard imports the same orchestration modules; it has nothing to call until they exist.
+
+Goal: confirmed requirement from the project owner for a web dashboard with deploy actions and visibility, scoped for a single user (the project owner) initially but built with guardrails suitable for later multi-user access. See `docs/initial-architecture-proposal.md` section 6a.
+
+Decisions already made:
+
+- Architecture: the dashboard imports the same TypeScript orchestration modules the CLI uses. It is not a wrapper around the `deployctl` binary.
+- Lives in the same repository as `deployctl`.
+- v1 scope: backend deploy, frontend deploy, status. Rollback and logs are deferred to a later phase.
+- Concurrency guardrail: reuses the Phase 5 `inProgress` field, no new lock infrastructure.
+- Auth: basic auth or a shared secret from Secrets Manager. Not Google SSO.
+- Audit: every dashboard-triggered deploy is recorded in deploy history with `deployedBy` set to the authenticated identity.
+- Tech stack: a small server-rendered TypeScript app (for example Express/Fastify with EJS or htmx), not a full SPA framework or Next.js.
+
+Open items to confirm before/during this phase:
+
+- Network restriction mechanism: possibly Google Identity-Aware Proxy (IAP), mentioned but not confirmed; IP-allowlisted security group is the fallback.
+- Hosting target: likely a small dedicated instance separate from the tenant-serving ASG/EC2 instances, not yet confirmed.
+
+Tasks:
+
+- Confirm open items above.
+- Scaffold a minimal server-rendered app in the same repo, importing orchestration modules directly.
+- Implement backend/frontend deploy actions calling the same modules as the CLI.
+- Implement status view reading `current.json`.
+- Wire the Phase 5 `inProgress` guardrail into the dashboard's deploy flow with a clear "already in progress" UI state.
+- Implement basic auth/shared secret and apply the chosen network restriction.
+- Record authenticated identity into deploy history on every dashboard-triggered action.
