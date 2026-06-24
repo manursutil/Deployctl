@@ -56,6 +56,29 @@ High-level order (details in each phase):
 - Phase 10 (ASG reconciliation) is blocked on Phase 0 ASG-bootstrap discovery.
 - Phase 15 (dashboard) requires Phases 2-9 done; it calls the same modules.
 
+## AWS Connectivity
+
+This section is reference context, not a phase. It describes how `deployctl` reaches AWS, so the phases below can assume it.
+
+`deployctl` connects to AWS purely through each service's HTTPS API, using the AWS SDK (isolated in `adapters/`). There is no SSH, VPN, or tunnel. Every request is signed with least-privilege IAM credentials that come from wherever the tool runs (a Bitbucket pipeline or an operator machine).
+
+Use AWS SDK for JavaScript v3 (modular `@aws-sdk/client-*` packages); credentials resolve from the standard environment/role chain. The region source is not yet decided (Phase 0).
+
+There are two distinct connections to AWS — a "two-hop" model:
+
+- Hop A — `deployctl` -> AWS APIs (control plane). The tool only ever calls AWS APIs. For a backend deploy it does not reach the server directly; it calls the SSM API to run the deploy script on the target EC2/ASG instances. This is why operators need no SSH keys — only permission to call SSM. `deployctl` also calls S3 (frontend sync, deploy history/current-state) and CloudWatch Logs (reads) over the same path.
+- Hop B — the EC2 server -> AWS APIs. Once the deploy script runs on the server, the server makes its own AWS calls using its EC2 instance role, not the operator's credentials. The key case is secrets: `deployctl` passes only the secret name; the server reads the value from Secrets Manager at the last moment, so secret values never pass through the tool, pipeline logs, or an operator screen.
+
+| Action | AWS service / API | Caller |
+| --- | --- | --- |
+| Run the backend deploy on servers | SSM Run Command | `deployctl` (Hop A) |
+| Read a tenant's secrets | Secrets Manager | EC2 server (Hop B) |
+| Sync frontend files to the tenant bucket | S3 | `deployctl` (Hop A) |
+| Store deploy history and current state | S3 | `deployctl` (Hop A) |
+| Read application logs | CloudWatch Logs | `deployctl` (Hop A) |
+
+Two connections here are not AWS APIs: ref resolution (Phase 3) talks to Git/Bitbucket, and the frontend is served through Cloudflare, which a normal deploy does not change. Defining the exact least-privilege IAM for both hops is a Phase 0 task; `deployctl`'s IAM covers Hop A, and the EC2 instance role covers Hop B.
+
 ## Phase 0: Discovery And Decisions
 
 Status: `Not started`
@@ -173,7 +196,7 @@ Tasks:
 - Write EC2-local backend deploy script.
 - Prepare `/opt/sherwood/releases/<commit>`.
 - Install dependencies and build once per release.
-- Generate protected tenant env file from Secrets Manager values on EC2.
+- Generate protected tenant env file from Secrets Manager values on EC2. The Secrets Manager read happens inside the `scripts/ec2/` server-side script (Hop B), not in `core/`; the TypeScript side passes only the secret name, never the value.
 - Update tenant `current` symlink.
 - Restart only selected tenant PM2 processes.
 - Run backend health check.
