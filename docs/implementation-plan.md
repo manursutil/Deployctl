@@ -204,18 +204,26 @@ Completed:
 
 ## Phase 4: Deploy History And Current State
 
-Status: `Not started`
+Status: `Done`
 
 Goal: store deploy audit events and current desired state in S3 JSON records.
 
 Tasks:
 
-- Define deploy event schema.
-- Define rollback event schema.
-- Define current-state schema.
-- Write append-only event records.
-- Read and update `current.json`.
-- Support previous-version lookup for rollback.
+- [x] Define deploy event schema.
+- [x] Define rollback event schema.
+- [x] Define current-state schema.
+- [x] Write append-only event records.
+- [x] Read and update `current.json`.
+- [x] Support previous-version lookup for rollback.
+
+Completed:
+
+- Added `src/core/history.ts` with deploy event, rollback event, and current-state schemas.
+- Added the `DeployHistoryRepository` seam for append-only events and mutable current state.
+- Added `InMemoryDeployHistoryRepository` for tests and future orchestration tests.
+- Added `applySuccessfulEventToCurrentState(...)` and `previousSuccessfulVersion(...)`.
+- Included optional `inProgress` state in `CurrentState` so Phase 5 can build on the same record.
 
 ## Phase 5: Deployment Guardrail
 
