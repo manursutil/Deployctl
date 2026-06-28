@@ -31,6 +31,17 @@ refPolicies:
   production:
     allowMovingBranches: false
 
+# SSM Run Command target selection per environment. Placeholder identifiers
+# until Phase 0 discovery confirms the real staging instances and production ASG.
+ssmTargets:
+  staging:
+    mode: instanceIds
+    instanceIds:
+      - i-0000000000staging0
+  production:
+    mode: asg
+    autoScalingGroupName: sherwood-production-asg
+
 retention:
   successfulVersionsPerTarget: 10
   keepDays: 30
