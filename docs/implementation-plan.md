@@ -33,6 +33,7 @@ scripts/
   ec2/                  # server-local shell run via SSM (proposal §7)
 dashboard/              # later — Phase 15, second controller over core/
 test/                   # mirrors src/, public-behavior-first
+deployctl.config.yml    # project/infra/build config                     (Phase 1)
 tenants.yml             # tenant registry config                       (Phase 2)
 ```
 
@@ -62,7 +63,7 @@ This section is reference context, not a phase. It describes how `deployctl` rea
 
 `deployctl` connects to AWS purely through each service's HTTPS API, using the AWS SDK (isolated in `adapters/`). There is no SSH, VPN, or tunnel. Every request is signed with least-privilege IAM credentials that come from wherever the tool runs (a Bitbucket pipeline or an operator machine).
 
-Use AWS SDK for JavaScript v3 (modular `@aws-sdk/client-*` packages); credentials resolve from the standard environment/role chain. The region source is not yet decided (Phase 0).
+Use AWS SDK for JavaScript v3 (modular `@aws-sdk/client-*` packages); credentials resolve from the standard environment/role chain. The region should be read from validated project config once confirmed.
 
 There are two distinct connections to AWS — a "two-hop" model:
 
@@ -94,13 +95,41 @@ Tasks:
 - Confirm CloudWatch log group and stream naming.
 - Confirm Secrets Manager naming conventions.
 - Confirm production ASG bootstrap behavior for replacement instances.
-- Confirm how `deployctl` accesses the application repository for ref resolution and builds.
-- Confirm authoritative backend and frontend package managers and build commands.
+- Confirm how `deployctl` accesses the application repository for ref resolution and builds, then record it in `deployctl.config.yml`.
+- Confirm authoritative backend and frontend package managers and build commands, then record them in `deployctl.config.yml`.
 - Confirm whether backend native dependencies must be installed and built on EC2.
-- Confirm frontend build and runtime config model.
+- Confirm exact frontend build variables and how tenant/env values are supplied to the build command, then record the allowed variables/config identity inputs in `deployctl.config.yml`. Decision for v1: keep the current build-time variable model rather than introducing runtime config.
 - Note: concurrency is handled by an `inProgress` field on `current.json`, not DynamoDB or S3 locks (decided; see Phase 5).
-- Choose deploy history and artifact S3 buckets or prefixes.
+- Choose deploy history and artifact S3 buckets or prefixes, then record them in `deployctl.config.yml`.
 - Define least-privilege IAM requirements.
+
+## Project Configuration
+
+`deployctl` should use a declarative YAML project config, `deployctl.config.yml`, for environment-dependent facts that let the implementation progress without hard-coding unconfirmed infrastructure details. The file is operational data, not executable code: parse YAML, validate it against a strict schema, and expose a typed `DeployctlConfig` object internally.
+
+Use `deployctl.config.yml` for configurable facts such as:
+
+- AWS region.
+- Application repository URL/path.
+- Backend and frontend package managers and build commands.
+- Deploy history and artifact S3 bucket/prefix locations.
+- Ref policy per environment, such as whether moving branch refs are allowed.
+- SSM target selection strategy once confirmed.
+- CloudWatch log group and stream patterns once confirmed.
+- Frontend build-time variable names and artifact build-config identity.
+- Cleanup retention settings.
+- Later dashboard auth, hosting, and network restriction settings.
+
+Keep architectural invariants in code and tests, not as broad config switches:
+
+- Backend releases are immutable commit-keyed release directories with tenant `current` symlinks.
+- Deploys resolve refs to immutable full commit SHAs before deploy work.
+- Production does not accept moving branch refs.
+- Secret values never pass through `deployctl`; only secret references do.
+- The `current.json.inProgress` guardrail is the concurrency mechanism.
+- CLI commands and the future dashboard call the same orchestration modules.
+
+`tenants.yml` remains separate from `deployctl.config.yml`: `tenants.yml` maps environments and tenants to tenant-specific resource references, process names, and URLs; `deployctl.config.yml` describes project-wide infrastructure, build, storage, and policy settings.
 
 ## Phase 1: CLI Foundation
 
@@ -112,6 +141,7 @@ Tasks:
 
 - Add npm package scaffold and TypeScript configuration.
 - Add a minimal CLI entrypoint at `src/cli.ts`.
+- Add `deployctl.config.yml` schema/types and a loader that validates YAML into a typed config object without AWS side effects.
 - Add one public CLI behavior test (for example `--help`).
 - Add command parser structure when the next public behavior is chosen.
 - Add shared output and error conventions.
@@ -119,7 +149,7 @@ Tasks:
 - Keep implementation behind stable interfaces where Phase 0 decisions are still open.
 - Record verified commands (test, typecheck, CLI invocation) in `CONTEXT.md`.
 
-Done when: `npm test` and `npm run typecheck` run clean and `deployctl --help` prints usage, covered by a test.
+Done when: `npm test` and `npm run typecheck` run clean, `deployctl --help` prints usage, and `deployctl.config.yml` loading/validation is covered by tests without making AWS calls.
 
 ## Phase 2: Tenant Registry
 
@@ -206,16 +236,19 @@ Tasks:
 
 Status: `Not started`
 
-Goal: build or reuse commit-based frontend artifacts and sync them to tenant S3 buckets.
+Goal: build or reuse tenant/env-specific frontend artifacts and sync them to tenant S3 buckets.
+
+Decision: v1 keeps the current frontend model where tenant/environment variables are baked into the static bundle at build time. Runtime config would be cleaner for artifact reuse, but it would require changing all frontend clients before `deployctl` can ship. Therefore v1 artifacts must be keyed by resolved commit plus tenant/environment or a build-config fingerprint, not by commit SHA alone.
 
 Tasks:
 
 - Define artifact storage layout.
-- Check whether artifact exists for a commit.
-- Build and store missing artifacts.
+- Include tenant/environment/build-config identity in the artifact key so one tenant's build cannot be reused for another tenant by accident.
+- Check whether artifact exists for the resolved commit and exact tenant/env build config.
+- Build and store missing artifacts using the tenant/env build-time variables from config.
 - Sync artifact files to tenant frontend bucket.
 - Apply explicit cache headers.
-- Write tenant runtime config if needed.
+- Do not introduce runtime config in v1; record it as a future improvement once the frontend can read a public config file at startup.
 - Run frontend smoke check.
 
 ## Phase 8: Rollback
@@ -315,12 +348,15 @@ Current docs:
 - `docs/initial-architecture-proposal.md`
 - `docs/multi-tenant-deployment-explainer.md`
 - `docs/implementation-plan.md`
+- `docs/implementation-plan-detailed.md`
+- `docs/presentation-qa.md`
 - `CONTEXT.md`
 
 Completed:
 
 - Added agent guidance requiring `docs/implementation-plan.md` to be updated with implementation progress.
 - Added PR-sized work guidance for features, bug fixes, behavior changes, and operational changes.
+- Added presentation Q&A covering architecture, scope, security, failure modes, rollback, observability, and known Phase 0 gaps.
 
 Future docs:
 

@@ -55,9 +55,8 @@ Frontend deploy path:
 ```text
 deployctl
   -> resolve ref to commit SHA
-  -> build or reuse frontend artifact for that commit
+  -> build or reuse frontend artifact for that commit + tenant/env build config
   -> sync static files to tenant S3 frontend bucket
-  -> optional tenant runtime config file
   -> Cloudflare serves tenant domain
   -> smoke check
   -> deploy history
@@ -66,12 +65,13 @@ deployctl
 Important architectural rules:
 
 - `deployctl` should be a small TypeScript CLI running on Node.js.
+- Project-wide infrastructure, build, storage, and policy settings should live in declarative YAML config at `deployctl.config.yml`, parsed and validated into typed TypeScript. Use config for environment-dependent facts, not for replacing core architectural invariants.
 - A web dashboard is a confirmed requirement (requested by the project owner), but it is sequenced after the CLI's orchestration modules (tenant registry, ref resolution, history, the `inProgress` guardrail, backend/frontend deploy, rollback, status/logs) are done. See `docs/initial-architecture-proposal.md` section 6a and `docs/implementation-plan.md` Phase 15. Do not start the dashboard before those modules exist and are directly importable.
 - The dashboard must call the same orchestration modules as the CLI, not wrap or shell out to the `deployctl` binary.
 - Deployment orchestration, validation, AWS SDK calls, history, and user-facing errors belong in TypeScript.
 - Shell should be limited to small EC2-local scripts invoked through SSM.
 - Backend deploys are commit-based release directories, not a single mutable Git checkout.
-- Frontend deploys are commit-based static artifacts synced to tenant buckets.
+- Frontend deploys are static artifacts synced to tenant buckets. In v1, frontend tenant/environment variables are baked in at build time, so artifacts must be keyed by commit plus tenant/env/config identity rather than commit SHA alone.
 - Backend and frontend deploy independently.
 - Normal deploys should not change Terraform, DNS, Cloudflare routing, tenant onboarding, database provisioning, or migrations.
 
@@ -101,13 +101,12 @@ Backend-specific flow:
 
 Frontend-specific flow:
 
-1. Check whether a frontend artifact exists for the resolved commit.
-2. Build and store the artifact if needed.
+1. Check whether a frontend artifact exists for the resolved commit and exact tenant/env build config.
+2. Build and store the artifact if needed, supplying tenant/env variables at build time.
 3. Read the tenant frontend bucket from `tenants.yml`.
 4. Sync artifact files to the tenant S3 bucket.
-5. Write tenant-specific runtime config if needed.
-6. Set explicit cache headers.
-7. Smoke check the tenant frontend URL.
+5. Set explicit cache headers.
+6. Smoke check the tenant frontend URL.
 
 ## Domain Model
 
@@ -123,7 +122,7 @@ The current proposed operational domain model is:
 - Backend release: immutable prepared release directory at `/opt/sherwood/releases/<commit-sha>`.
 - Tenant backend pointer: symlink at `/opt/sherwood/tenants/<tenant>/current` pointing to a backend release.
 - PM2 process: tenant-specific runtime process, normally one API process and one worker process per tenant.
-- Frontend artifact: static build output stored by commit SHA and reusable across tenants.
+- Frontend artifact: static build output stored by resolved commit plus tenant/env/config identity because v1 bakes tenant variables into the bundle at build time.
 - Tenant frontend bucket: tenant-specific S3 bucket receiving the deployed frontend files.
 - Deploy event: append-only JSON record of a deploy, rollback, failure, or partial failure.
 - Current state: mutable JSON record describing the desired/current version for one tenant/app, including the `inProgress`/`since` concurrency guardrail.
@@ -136,7 +135,7 @@ Proposed storage relationships:
 - Deploy history stores events under `environment + tenant + app`.
 - Current state is one record per `environment + tenant + app`, and carries the `inProgress` guardrail for that key.
 - Backend releases are keyed by commit SHA and may be shared by many tenants.
-- Frontend artifacts are keyed by commit SHA and may be shared by many tenants.
+- Frontend artifacts are not keyed by commit SHA alone in v1; they include tenant/env/config identity so one tenant's build cannot be reused for another tenant by accident.
 
 Proposed cascade/retention behavior:
 
@@ -148,7 +147,7 @@ Proposed cascade/retention behavior:
 
 ## Proposed Tenant Registry Shape
 
-`tenants.yml` does not exist yet. The proposal expects it to store resource references, not secret values.
+`tenants.yml` does not exist yet. The proposal expects it to store tenant-specific resource references, not secret values. It stays separate from `deployctl.config.yml`: tenant config maps environments and tenants to resource references, process names, and URLs; project config describes shared infrastructure, build, storage, and policy settings.
 
 Example shape:
 
@@ -177,6 +176,7 @@ Intended patterns (none implemented yet; establish these as code is written):
 
 - Use TypeScript with Node.js ESM.
 - Use Node's built-in test runner via `node --import tsx --test`.
+- Use YAML for operational config files (`deployctl.config.yml`, `tenants.yml`), validated by strict schemas and represented as typed objects internally.
 - CLI behavior tests should invoke the public CLI entrypoint with `spawnSync`, not private functions.
 - Non-implemented commands should fail clearly without AWS side effects.
 
@@ -184,6 +184,7 @@ Expected implementation conventions from the proposal:
 
 - CLI commands should be thin controllers over focused orchestration modules.
 - Business rules should live in reusable deploy orchestration code, not inside command parsing.
+- Keep architectural invariants in code/tests rather than broad config switches: commit-pinned deploys, production rejecting moving branch refs, secret values never passing through `deployctl`, the `current.json.inProgress` guardrail, and CLI/dashboard sharing orchestration modules.
 - Validate tenant/env/ref before making AWS changes.
 - Resolve refs to full commit SHAs before deployment work starts.
 - Production should accept tags or commit SHAs, not moving branches.
@@ -223,6 +224,7 @@ Proposed paths from the architecture, not yet created (see the target repo struc
 - `src/`: TypeScript CLI entrypoint, command controllers, core orchestration modules, and AWS adapters.
 - `test/`: public-behavior-first tests mirroring `src/`.
 - `package.json`, `tsconfig.json`: Node package metadata and TypeScript configuration.
+- `deployctl.config.yml`: project-wide config for AWS region, app repository, build commands, deploy history/artifact locations, ref policies, target-selection/log patterns once confirmed, and retention settings.
 - `tenants.yml`: tenant registry with environment/tenant resource mappings.
 - `bitbucket-pipelines.yml`: pipeline entry points for invoking the CLI.
 - `scripts/`: small remote scripts, especially EC2-local commands invoked through SSM.
@@ -232,7 +234,7 @@ Proposed runtime paths, not repository paths:
 - `/opt/sherwood/releases/<commit-sha>`: prepared backend release on EC2.
 - `/opt/sherwood/tenants/<tenant>/current`: symlink to the selected backend release.
 - `/opt/sherwood/tenants/<tenant>/env.production.json`: protected tenant env file on EC2.
-- `s3://.../frontend/<commit-sha>.tar.gz`: proposed frontend artifact storage.
+- `s3://.../frontend/<commit-sha>/<env>/<tenant-or-config-fingerprint>.tar.gz`: proposed frontend artifact storage for v1 build-time tenant config.
 - `s3://skincair-<env>-deploy-history/deploys/<tenant>/<app>/events/<timestamp>-<deployId>.json`: proposed append-only deploy event storage.
 - `s3://skincair-<env>-deploy-history/deploys/<tenant>/<app>/current.json`: proposed current desired state storage.
 
@@ -268,6 +270,7 @@ When implementation begins, update this section with exact verified commands, su
 Repository gaps:
 
 - No code exists yet; the repo is docs-only.
+- No project config exists yet.
 - No tenant registry exists yet.
 - No deploy scripts exist yet.
 - No Bitbucket pipeline config exists yet.
@@ -281,7 +284,7 @@ Architecture and implementation open questions:
 - Define final least-privilege IAM policies.
 - Define the runbook for releases that require manual database migrations.
 - Confirm CloudWatch log group and stream naming conventions for tenant/process filtering.
-- Confirm whether frontend tenant config is runtime config or currently baked into the JS bundle.
+- Confirm exact frontend build-time variable names and how they differ per tenant/environment.
 - Define exact artifact retention and cleanup implementation.
 - Confirm the dashboard's network restriction mechanism: possibly Google Identity-Aware Proxy (IAP), mentioned by the project owner but not confirmed; IP-allowlisted security group is the fallback.
 - Confirm the dashboard's hosting target: likely a small dedicated instance separate from the tenant-serving ASG/EC2 instances, not yet confirmed.

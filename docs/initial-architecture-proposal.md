@@ -79,7 +79,7 @@ flowchart TB
   Symlink --> PM2["Restart tenant API and worker PM2 processes"]
   PM2 --> Health["Run tenant health check"]
 
-  FrontendDeploy --> Artifact["Build/store frontend artifact by commit SHA"]
+  FrontendDeploy --> Artifact["Build/store frontend artifact by commit + tenant/env config"]
   Artifact --> TenantBucket["Sync artifact to tenant S3 bucket"]
   TenantBucket --> Cloudflare["Cloudflare DNS/CDN/WAF"]
 
@@ -955,55 +955,59 @@ The protected env file exists because PM2 needs a repeatable way to start the pr
 
 ## 18. Frontend Build Artifacts
 
-Frontend builds should be stored as reusable artifacts by commit SHA.
+Frontend builds should be stored as versioned artifacts, but v1 cannot assume that a frontend artifact is reusable across tenants by commit SHA alone.
 
-Recommended model:
+Current v1 model:
 
 ```text
-Build once:
-  commit abc123 -> React static files
+Build per tenant/env config:
+  commit abc123 + client1 staging config -> React static files
+  commit abc123 + client2 staging config -> React static files
 
 Store:
-  s3://.../frontend/abc123.tar.gz
+  s3://.../frontend/abc123/staging/client1.tar.gz
+  s3://.../frontend/abc123/staging/client2.tar.gz
 
 Deploy:
-  abc123 artifact -> client1 S3 bucket
-  abc123 artifact -> client2 S3 bucket
+  abc123 + client1 artifact -> client1 S3 bucket
+  abc123 + client2 artifact -> client2 S3 bucket
 ```
 
 Why:
 
-The React frontend builds into static files. If the code is the same, the artifact should be the same. Tenant differences should be configuration, not separate code, unless the tenant truly needs a different commit.
+The current frontend is believed to bake tenant/environment variables into the static bundle at build time. Introducing runtime config would be a better long-term artifact model, but it would require changing every frontend client before deployment automation can ship. For v1, `deployctl` should match the existing frontend behavior.
 
 Important distinction:
 
 ```text
 Code difference -> different commit/artifact
-Tenant config difference -> same artifact + different config
+Tenant config difference -> different artifact in v1, because config is baked into the build
 ```
 
-Tenant-specific frontend config should preferably be runtime config, for example:
+The artifact key must therefore include more than the commit SHA:
 
 ```text
-config.json
+resolved commit + environment + tenant
+or
+resolved commit + build config fingerprint
 ```
 
 Pros:
 
-- Build once, deploy many.
-- Faster deploys.
-- Easier frontend rollback.
-- Exact deployed artifact is known.
+- Matches the frontend as it exists today.
+- Avoids blocking v1 on a cross-tenant frontend migration.
+- Keeps each tenant's baked API URL and public settings isolated.
+- Frontend rollback can redeploy the exact old tenant/env artifact.
 
 Cons:
 
-- Requires artifact storage.
+- Requires more builds than a shared runtime-config model.
 - Requires retention policy.
-- If the frontend currently bakes tenant config into the JS bundle, this may need adjustment.
+- Requires careful artifact keys so `client2` never receives an artifact built with `client1` variables.
 
 Decision:
 
-> Store frontend artifacts by commit SHA and reuse them across tenants when possible. Tenant-specific frontend config should be runtime config or a small per-tenant file written during S3 sync.
+> For v1, keep frontend tenant/environment variables as build-time variables. Store frontend artifacts by resolved commit plus tenant/environment or build-config fingerprint. Do not introduce runtime config in v1; keep it as a future improvement once the frontend can read a public config file at startup.
 
 Beginner explanation:
 
@@ -1015,18 +1019,18 @@ assets/app.js
 assets/app.css
 ```
 
-Those files can be uploaded to S3 and served through Cloudflare. If two tenants are running the same code commit, they should usually be able to use the same static build artifact.
+Those files can be uploaded to S3 and served through Cloudflare. In an ideal model, if two tenants run the same code commit, they could share the same static build artifact.
 
-The key distinction is code versus configuration:
+But the current frontend appears to use build-time variables. That means the tenant's public API URL or feature flags may be baked into the JavaScript files during build.
 
 ```text
-Different code -> different commit -> different artifact
-Different tenant settings -> same artifact + different config
+client1 + commit abc123 -> artifact with client1 API URL
+client2 + commit abc123 -> artifact with client2 API URL
 ```
 
-For example, `client1` and `client2` may use different API URLs or feature flags. That should ideally live in a small runtime config file like `config.json`, not be baked into the JavaScript bundle.
+If `deployctl` stored artifacts only by commit SHA, it could accidentally reuse a `client1` build for `client2`. That is the bug this decision avoids.
 
-This makes rollback easier. Instead of rebuilding old code, the deploy tool can redeploy the exact old artifact that was already known to work.
+Runtime config remains a good later improvement. It would let the project build once per commit and write a small per-tenant config file during S3 sync. It is deferred because it requires frontend changes outside this first deployment-automation slice.
 
 ## 19. Frontend Deploy Flow
 
@@ -1036,12 +1040,12 @@ Frontend deploy flow:
 1. Operator runs deployctl.
 2. deployctl validates tenant/env/ref.
 3. deployctl resolves ref to commit SHA.
-4. deployctl checks whether frontend artifact exists for that commit.
-5. If not, pipeline builds the frontend from that commit.
-6. Store artifact by commit SHA.
-7. Read tenant frontend bucket from tenants.yml.
-8. Sync artifact files to tenant S3 bucket.
-9. Write tenant-specific config file if needed.
+4. deployctl computes the frontend artifact key from commit + tenant/env build config.
+5. deployctl checks whether that exact artifact already exists.
+6. If not, pipeline builds the frontend from that commit using tenant/env build-time variables.
+7. Store artifact by commit + tenant/env/config identity.
+8. Read tenant frontend bucket from tenants.yml.
+9. Sync artifact files to tenant S3 bucket.
 10. Run smoke check against tenant frontend URL.
 11. Record deploy history.
 ```
@@ -1085,17 +1089,17 @@ Those files include a content hash in the filename. If the content changes, the 
 
 But `index.html` usually keeps the same filename. It points the browser to the current hashed JS/CSS files. If Cloudflare or the browser keeps an old `index.html`, users may keep loading the old frontend after a deploy.
 
-Tenant runtime config, such as `config.json`, also should not be cached for a long time because it may contain tenant-specific API URLs, feature flags, or environment settings.
+If a future runtime config file such as `config.json` is introduced, it also should not be cached for a long time because it may contain tenant-specific API URLs, feature flags, or environment settings. In v1, tenant/env frontend config is expected to be baked into the build output instead.
 
 Recommended version 1 behavior:
 
 ```text
 1. Upload hashed assets with long cache headers.
 2. Upload index.html with no-cache or short-cache headers.
-3. Upload tenant config file with no-cache or short-cache headers.
-4. Do not immediately delete old hashed assets during deploy.
-5. If Cloudflare API access is available, purge index.html and config.json after deploy.
-6. If Cloudflare API access is not available, rely on short/no-cache headers and document that behavior.
+3. Do not immediately delete old hashed assets during deploy.
+4. If Cloudflare API access is available, purge index.html after deploy.
+5. If Cloudflare API access is not available, rely on short/no-cache headers and document that behavior.
+6. If runtime config is added in a later phase, upload it with no-cache or short-cache headers and purge it with index.html.
 ```
 
 Pros:
@@ -1116,13 +1120,13 @@ Cons:
 
 Decision:
 
-> Version 1 must set frontend cache headers deliberately. Hashed static assets should use long-lived caching, while `index.html` and tenant runtime config should use no-cache or short-cache headers. Cloudflare purge for `index.html` and tenant config is recommended if API access is available, but the v1 design should still work safely without DNS or Cloudflare changes.
+> Version 1 must set frontend cache headers deliberately. Hashed static assets should use long-lived caching, while `index.html` should use no-cache or short-cache headers. Cloudflare purge for `index.html` is recommended if API access is available, but the v1 design should still work safely without DNS or Cloudflare changes. If runtime config is introduced later, it should follow the same no-cache/short-cache treatment as `index.html`.
 
 Beginner explanation:
 
 Browsers and Cloudflare save copies of frontend files so pages load faster. That is good for large files that change names when their content changes, such as `app.abc123.js`.
 
-It is risky for files that keep the same name, such as `index.html` or `config.json`.
+It is risky for files that keep the same name, such as `index.html`. The same would apply to a future `config.json` runtime config file.
 
 The deploy system should therefore say:
 
@@ -1552,7 +1556,7 @@ Backend release directories:
 /opt/sherwood/releases/<commit>
 
 Frontend artifacts:
-s3://.../frontend/<commit>.tar.gz
+s3://.../frontend/<commit>/<env>/<tenant-or-config-fingerprint>.tar.gz
 ```
 
 Recommended baseline:
@@ -1732,4 +1736,4 @@ The freelancer should deliver:
 
 ## 30. One-Sentence Summary
 
-Use a CLI-first TypeScript deployment system where deploys are resolved to exact commit SHAs, backend releases are prepared once per commit on shared EC2/ASG instances and selected per tenant through symlinks plus PM2 restarts, while frontend builds are stored as reusable commit-based artifacts and synced to tenant S3 buckets, with Secrets Manager, CloudWatch Logs, and JSON deploy history providing secure configuration, observability, and rollback.
+Use a CLI-first TypeScript deployment system where deploys are resolved to exact commit SHAs, backend releases are prepared once per commit on shared EC2/ASG instances and selected per tenant through symlinks plus PM2 restarts, while v1 frontend builds are stored as tenant/env-specific build-time-config artifacts and synced to tenant S3 buckets, with Secrets Manager, CloudWatch Logs, and JSON deploy history providing secure configuration, observability, and rollback.
