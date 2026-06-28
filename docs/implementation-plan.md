@@ -264,10 +264,11 @@ Progress:
 - Added `getTenantConfig(registry, env, tenant)` to `src/core/tenants.ts` for single-tenant lookup.
 - Tests cover success, guardrail conflict, executor-throw failure, and partial_failure status (AWS work mocked behind the executor seam).
 
+- Added the `deployctl deploy backend --tenant <t> --env <e> --ref <ref>` CLI controller. It validates required flags, tenant/env existence, and a configured SSM target selector offline (no AWS or network), then fails clearly that AWS execution is still pending. This keeps the seam in place for the adapters below without faking a deploy.
+
 Still pending (needs Phase 0 confirmation of real infra values before it can be verified end to end):
 
-- Implement the `SsmDeployExecutor` AWS adapter (`src/adapters/ssm.ts`) over SSM Run Command, resolving `asg` targets to healthy instances at runtime.
-- Add the `deployctl deploy backend` CLI controller (`src/commands/deploy.ts`) as a thin caller of `deployBackend`.
+- Implement the `SsmDeployExecutor` AWS adapter (`src/adapters/ssm.ts`) over SSM Run Command, resolving `asg` targets to healthy instances at runtime, and wire it (plus an S3-backed `DeployHistoryRepository`) into the CLI controller.
 - Write EC2-local backend deploy script.
 - Prepare `/opt/sherwood/releases/<commit>`.
 - Install dependencies and build once per release.

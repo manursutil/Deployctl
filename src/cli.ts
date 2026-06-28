@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { loadDeployctlConfig } from "./core/config.js";
-import { listTenants, loadTenantRegistry } from "./core/tenants.js";
+import { getTenantConfig, listTenants, loadTenantRegistry } from "./core/tenants.js";
 import { DeployctlError, formatError, type Io } from "./shared.js";
 
 const usage = `deployctl
@@ -51,11 +51,52 @@ export async function runCli(argv: string[], io: Io = { stdout: process.stdout, 
       return 0;
     }
 
+    if (args[0] === "deploy" && args[1] === "backend") {
+      return await runDeployBackend(args, io);
+    }
+
     throw new DeployctlError(`Command not implemented yet: ${args.join(" ")}`);
   } catch (error) {
     io.stderr.write(`${formatError(error)}\n`);
     return error instanceof DeployctlError ? error.exitCode : 1;
   }
+}
+
+async function runDeployBackend(args: string[], io: Io): Promise<number> {
+  const tenant = requiredOption(args, "--tenant");
+  const environment = requiredOption(args, "--env");
+  const requestedRef = requiredOption(args, "--ref");
+
+  const config = await loadDeployctlConfig(optionValue(args, "--config") ?? "deployctl.config.yml");
+  const registry = await loadTenantRegistry(optionValue(args, "--tenants") ?? "tenants.yml");
+
+  // Validate everything resolvable without AWS or network before reporting the
+  // pending boundary, so operators get input errors immediately.
+  getTenantConfig(registry, environment, tenant);
+
+  if (config.ssmTargets[environment] === undefined) {
+    throw new DeployctlError(`No SSM target selector configured for environment: ${environment}`);
+  }
+
+  io.stdout.write(`Validated backend deploy for ${environment}/${tenant} (ref ${requestedRef}).\n`);
+
+  // The orchestration module (deployBackend) is implemented and unit-tested
+  // behind the SsmDeployExecutor seam, but the production SSM executor and the
+  // S3-backed deploy history adapter are still pending Phase 0 infra
+  // confirmation, so no real deploy runs yet.
+  throw new DeployctlError(
+    `Backend deploy for ${environment}/${tenant} is not yet executable: the SSM executor and S3 deploy history adapters are pending (Phase 6).`,
+  );
+}
+
+function requiredOption(args: string[], name: string): string {
+  const value = optionValue(args, name);
+
+  if (value === undefined) {
+    throw new DeployctlError(`${name} requires a value`);
+  }
+
+  return value;
 }
 
 function optionValue(args: string[], name: string): string | undefined {

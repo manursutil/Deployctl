@@ -277,7 +277,10 @@ npm run typecheck
 node --import tsx src/cli.ts --help
 node --import tsx src/cli.ts config check
 node --import tsx src/cli.ts tenants list --env staging
+node --import tsx src/cli.ts deploy backend --tenant client1 --env staging --ref main
 ```
+
+The `deploy backend` command currently validates inputs offline (tenant/env existence and a configured SSM target selector) and then fails clearly that AWS execution is still pending; it makes no AWS or network calls until the SSM executor and S3 history adapters land.
 
 Proposed operator commands from the architecture:
 

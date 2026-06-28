@@ -61,3 +61,34 @@ test("deployctl tenants list exits non-zero with a clear message for missing ten
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Could not read tenants config at does-not-exist.yml/);
 });
+
+test("deployctl deploy backend requires --ref", () => {
+  const result = spawnSync(process.execPath, ["--import", "tsx", "src/cli.ts", "deploy", "backend", "--tenant", "client1", "--env", "staging"], {
+    encoding: "utf8",
+  });
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--ref requires a value/);
+});
+
+test("deployctl deploy backend rejects an unknown tenant before any AWS work", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "src/cli.ts", "deploy", "backend", "--tenant", "ghost", "--env", "staging", "--ref", "main"],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Tenant not found in staging: ghost/);
+});
+
+test("deployctl deploy backend validates inputs and reports that AWS execution is still pending", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "src/cli.ts", "deploy", "backend", "--tenant", "client1", "--env", "staging", "--ref", "main"],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /not yet executable/);
+});
