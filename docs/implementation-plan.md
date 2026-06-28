@@ -185,16 +185,22 @@ Done when: `deployctl tenants list --env staging` prints the configured tenants 
 
 ## Phase 3: Git Ref Resolution
 
-Status: `Not started`
+Status: `Done`
 
 Goal: resolve branch, tag, or SHA input into an immutable full commit SHA before deploy work.
 
 Tasks:
 
-- Resolve refs from the application repository.
-- Allow branch/tag/SHA for staging.
-- Reject moving branches for production.
-- Store both requested ref and resolved commit in deploy metadata.
+- [x] Resolve refs from the application repository.
+- [x] Allow branch/tag/SHA for staging.
+- [x] Reject moving branches for production.
+- [x] Store both requested ref and resolved commit in deploy metadata.
+
+Completed:
+
+- Added `src/core/refs.ts` with `resolveDeploymentRef(input)`, returning `requestedRef`, immutable `resolvedCommit`, and `refKind`.
+- Added `src/adapters/git.ts` with `GitCliRefResolver`, a thin Git CLI adapter around `git ls-remote`.
+- Added tests for staging branch refs, production branch rejection, immutable production refs, and full commit SHA validation.
 
 ## Phase 4: Deploy History And Current State
 
