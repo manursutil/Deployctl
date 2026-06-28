@@ -1,6 +1,6 @@
 # CONTEXT.md
 
-This repository now has a Phase 1 TypeScript CLI scaffold plus docs and agent guidance. There is no tenant registry, deploy implementation, migrations, remote script, or pipeline configuration yet.
+This repository now has a TypeScript CLI scaffold, tenant registry loading, docs, and agent guidance. There is no deploy implementation, migrations, remote script, or pipeline configuration yet.
 
 Use this file as the short project context for future work. Treat architecture details below as the current proposed direction from `docs/initial-architecture-proposal.md`, not as verified runtime behavior.
 
@@ -16,7 +16,7 @@ Version 1 is scoped to deployment automation on top of existing AWS infrastructu
 
 ## Current Repository State
 
-Implemented code: Phase 1 CLI foundation.
+Implemented code: Phase 1 CLI foundation and Phase 2 tenant registry.
 
 Current files:
 
@@ -29,7 +29,9 @@ Current files:
 - `deployctl.config.yml`: initial project config with placeholder operational values.
 - `src/cli.ts`: public CLI entrypoint and command dispatch.
 - `src/core/config.ts`: YAML config loader and strict validator.
+- `src/core/tenants.ts`: `tenants.yml` loader, strict validator, secret-value guard, and tenant listing.
 - `src/shared.ts`: shared CLI errors, IO, and formatting helpers.
+- `tenants.yml`: initial tenant registry with resource references only.
 - `test/`: Node test runner tests for public CLI and config behavior.
 
 ## Architecture
@@ -153,7 +155,7 @@ Proposed cascade/retention behavior:
 
 ## Proposed Tenant Registry Shape
 
-`tenants.yml` does not exist yet. The proposal expects it to store tenant-specific resource references, not secret values. It stays separate from `deployctl.config.yml`: tenant config maps environments and tenants to resource references, process names, and URLs; project config describes shared infrastructure, build, storage, and policy settings.
+`tenants.yml` stores tenant-specific resource references, not secret values. It stays separate from `deployctl.config.yml`: tenant config maps environments and tenants to resource references, process names, and URLs; project config describes shared infrastructure, build, storage, and policy settings.
 
 Example shape:
 
@@ -186,6 +188,7 @@ Implemented patterns:
 - CLI behavior tests should invoke the public CLI entrypoint with `spawnSync`, not private functions.
 - Non-implemented commands should fail clearly without AWS side effects.
 - Keep CLI command controllers thin over directly importable modules. The current public seam is `runCli(argv, io)` in `src/cli.ts`; the config module seam is `loadDeployctlConfig(path)` in `src/core/config.ts`.
+- Tenant registry callers should use `loadTenantRegistry(path)` and `listTenants(registry, environment)` from `src/core/tenants.ts` rather than parsing YAML in command code.
 
 Expected implementation conventions from the proposal:
 
@@ -205,7 +208,7 @@ Expected implementation conventions from the proposal:
 Suggested future module seams, once code exists:
 
 - CLI command parsing.
-- Tenant config loading and validation.
+- Tenant config loading and validation: implemented in `src/core/tenants.ts`.
 - Git/Bitbucket ref resolution.
 - Concurrency guardrail (`inProgress`/`since` on `current.json`).
 - Deploy history/current-state repository.
@@ -227,15 +230,17 @@ Current paths:
 - `CONTEXT.md`: concise project context and implementation guardrails.
 - `src/cli.ts`: CLI entrypoint and initial dispatch.
 - `src/core/config.ts`: project config loading and validation.
+- `src/core/tenants.ts`: tenant registry loading, validation, likely-secret rejection, and tenant listing.
 - `src/shared.ts`: shared errors and IO formatting.
 - `test/cli.test.ts`: public `deployctl --help` behavior test.
 - `test/config.test.ts`: config loading and validation behavior tests.
+- `test/tenants.test.ts`: tenant registry validation behavior tests.
 - `package.json`, `package-lock.json`, `tsconfig.json`: Node package metadata and TypeScript configuration.
 - `deployctl.config.yml`: project-wide config for AWS region, app repository, build commands, deploy history/artifact locations, ref policies, and retention settings. Some values are placeholders until Phase 0 discovery confirms them.
+- `tenants.yml`: tenant registry with environment/tenant resource mappings. Current values are starter references and should be confirmed before real deploy use.
 
 Proposed paths from the architecture, not yet created (see the target repo structure in `docs/implementation-plan.md`):
 
-- `tenants.yml`: tenant registry with environment/tenant resource mappings.
 - `bitbucket-pipelines.yml`: pipeline entry points for invoking the CLI.
 - `scripts/`: small remote scripts, especially EC2-local commands invoked through SSM.
 
@@ -257,6 +262,7 @@ npm test
 npm run typecheck
 node --import tsx src/cli.ts --help
 node --import tsx src/cli.ts config check
+node --import tsx src/cli.ts tenants list --env staging
 ```
 
 Proposed operator commands from the architecture:
@@ -280,7 +286,7 @@ Update this section as new phases add linting, integration tests, CLI smoke test
 
 Repository gaps:
 
-- No tenant registry exists yet.
+- Tenant registry values are starter references and still need infrastructure confirmation.
 - No deploy scripts exist yet.
 - No Bitbucket pipeline config exists yet.
 - No deploy history schemas exist yet.

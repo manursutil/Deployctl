@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { loadDeployctlConfig } from "./core/config.js";
+import { listTenants, loadTenantRegistry } from "./core/tenants.js";
 import { DeployctlError, formatError, type Io } from "./shared.js";
 
 const usage = `deployctl
@@ -7,7 +8,7 @@ const usage = `deployctl
 Usage:
   deployctl --help
   deployctl config check [--config <path>]
-  deployctl tenants list --env <env>
+  deployctl tenants list --env <env> [--tenants <path>]
   deployctl status --tenant <tenant> --env <env>
   deployctl deploy backend|frontend --tenant <tenant> --env <env> --ref <ref>
   deployctl rollback backend|frontend --tenant <tenant> --env <env> --version <version>
@@ -15,6 +16,7 @@ Usage:
 
 Options:
   --config <path>  Path to deployctl.config.yml
+  --tenants <path> Path to tenants.yml
   -h, --help       Show this help
 `;
 
@@ -31,6 +33,21 @@ export async function runCli(argv: string[], io: Io = { stdout: process.stdout, 
       const configPath = optionValue(args, "--config") ?? "deployctl.config.yml";
       await loadDeployctlConfig(configPath);
       io.stdout.write(`Config OK: ${configPath}\n`);
+      return 0;
+    }
+
+    if (args[0] === "tenants" && args[1] === "list") {
+      const environment = optionValue(args, "--env");
+      if (environment === undefined) {
+        throw new DeployctlError("--env requires a value");
+      }
+
+      const tenantsPath = optionValue(args, "--tenants") ?? "tenants.yml";
+      const registry = await loadTenantRegistry(tenantsPath);
+      for (const tenant of listTenants(registry, environment)) {
+        io.stdout.write(`${tenant}\n`);
+      }
+
       return 0;
     }
 
