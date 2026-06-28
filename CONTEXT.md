@@ -16,7 +16,7 @@ Version 1 is scoped to deployment automation on top of existing AWS infrastructu
 
 ## Current Repository State
 
-Implemented code: Phase 1 CLI foundation, Phase 2 tenant registry, and Phase 3 git ref resolution.
+Implemented code: Phase 1 CLI foundation, Phase 2 tenant registry, Phase 3 git ref resolution, and Phase 4 deploy history/current-state schemas.
 
 Current files:
 
@@ -31,6 +31,7 @@ Current files:
 - `src/core/config.ts`: YAML config loader and strict validator.
 - `src/core/tenants.ts`: `tenants.yml` loader, strict validator, secret-value guard, and tenant listing.
 - `src/core/refs.ts`: deployment ref resolution policy that returns immutable commit metadata.
+- `src/core/history.ts`: deploy/rollback event schemas, current-state schema, repository seam, in-memory repository, and previous-version lookup.
 - `src/adapters/git.ts`: Git CLI adapter for resolving refs from the application repository.
 - `src/shared.ts`: shared CLI errors, IO, and formatting helpers.
 - `tenants.yml`: initial tenant registry with resource references only.
@@ -192,6 +193,7 @@ Implemented patterns:
 - Keep CLI command controllers thin over directly importable modules. The current public seam is `runCli(argv, io)` in `src/cli.ts`; the config module seam is `loadDeployctlConfig(path)` in `src/core/config.ts`.
 - Tenant registry callers should use `loadTenantRegistry(path)` and `listTenants(registry, environment)` from `src/core/tenants.ts` rather than parsing YAML in command code.
 - Ref resolution callers should use `resolveDeploymentRef(input)` from `src/core/refs.ts`. Core enforces environment ref policy and returns both `requestedRef` and immutable `resolvedCommit`; Git access stays behind the `RefResolver` adapter interface.
+- History callers should use the `DeployHistoryRepository` seam from `src/core/history.ts`. Append-only events and mutable current state are separate operations; successful deploy/rollback events update current state through `applySuccessfulEventToCurrentState(...)`.
 
 Expected implementation conventions from the proposal:
 
@@ -214,7 +216,7 @@ Suggested future module seams, once code exists:
 - Tenant config loading and validation: implemented in `src/core/tenants.ts`.
 - Git/Bitbucket ref resolution: implemented in `src/core/refs.ts` with Git access isolated in `src/adapters/git.ts`.
 - Concurrency guardrail (`inProgress`/`since` on `current.json`).
-- Deploy history/current-state repository.
+- Deploy history/current-state repository: core schemas and repository seam are implemented in `src/core/history.ts`; S3 persistence adapter is still pending.
 - Backend SSM deployment orchestration.
 - Frontend artifact and S3 sync orchestration.
 - Status and logs queries.
@@ -235,12 +237,14 @@ Current paths:
 - `src/core/config.ts`: project config loading and validation.
 - `src/core/tenants.ts`: tenant registry loading, validation, likely-secret rejection, and tenant listing.
 - `src/core/refs.ts`: environment-aware ref resolution into immutable commit metadata.
+- `src/core/history.ts`: deploy history event validation, current-state validation, repository seam, and in-memory repository.
 - `src/adapters/git.ts`: Git CLI ref resolver adapter.
 - `src/shared.ts`: shared errors and IO formatting.
 - `test/cli.test.ts`: public `deployctl --help` behavior test.
 - `test/config.test.ts`: config loading and validation behavior tests.
 - `test/tenants.test.ts`: tenant registry validation behavior tests.
 - `test/refs.test.ts`: ref resolution policy behavior tests.
+- `test/history.test.ts`: deploy history/current-state behavior tests.
 - `package.json`, `package-lock.json`, `tsconfig.json`: Node package metadata and TypeScript configuration.
 - `deployctl.config.yml`: project-wide config for AWS region, app repository, build commands, deploy history/artifact locations, ref policies, and retention settings. Some values are placeholders until Phase 0 discovery confirms them.
 - `tenants.yml`: tenant registry with environment/tenant resource mappings. Current values are starter references and should be confirmed before real deploy use.
