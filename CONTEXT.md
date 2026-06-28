@@ -1,10 +1,10 @@
 # CONTEXT.md
 
-This repository is documentation-first: it currently contains only docs and agent guidance, with no code yet. There is no CLI scaffold, tenant registry, deploy implementation, migrations, remote script, or pipeline configuration.
+This repository now has a Phase 1 TypeScript CLI scaffold plus docs and agent guidance. There is no tenant registry, deploy implementation, migrations, remote script, or pipeline configuration yet.
 
 Use this file as the short project context for future work. Treat architecture details below as the current proposed direction from `docs/initial-architecture-proposal.md`, not as verified runtime behavior.
 
-When coding starts, update this file in the same change set with the actual source layout, commands, domain model, and conventions that are introduced.
+When new implementation phases land, update this file in the same change set with the actual source layout, commands, domain model, and conventions that are introduced.
 
 ## Project Purpose
 
@@ -16,7 +16,7 @@ Version 1 is scoped to deployment automation on top of existing AWS infrastructu
 
 ## Current Repository State
 
-Implemented code: none. The repo is docs-only and starting fresh against the current implementation plan.
+Implemented code: Phase 1 CLI foundation.
 
 Current files:
 
@@ -25,6 +25,12 @@ Current files:
 - `docs/initial-architecture-proposal.md`: primary architecture proposal and decisions.
 - `docs/implementation-plan.md`: phased implementation tracker and current phase status.
 - `docs/multi-tenant-deployment-explainer.md`: beginner-friendly explanation of the no-Docker deployment model.
+- `package.json`, `package-lock.json`, `tsconfig.json`: TypeScript CLI package scaffold.
+- `deployctl.config.yml`: initial project config with placeholder operational values.
+- `src/cli.ts`: public CLI entrypoint and command dispatch.
+- `src/core/config.ts`: YAML config loader and strict validator.
+- `src/shared.ts`: shared CLI errors, IO, and formatting helpers.
+- `test/`: Node test runner tests for public CLI and config behavior.
 
 ## Architecture
 
@@ -172,13 +178,14 @@ Rules:
 
 ## Patterns And Conventions
 
-Intended patterns (none implemented yet; establish these as code is written):
+Implemented patterns:
 
 - Use TypeScript with Node.js ESM.
 - Use Node's built-in test runner via `node --import tsx --test`.
 - Use YAML for operational config files (`deployctl.config.yml`, `tenants.yml`), validated by strict schemas and represented as typed objects internally.
 - CLI behavior tests should invoke the public CLI entrypoint with `spawnSync`, not private functions.
 - Non-implemented commands should fail clearly without AWS side effects.
+- Keep CLI command controllers thin over directly importable modules. The current public seam is `runCli(argv, io)` in `src/cli.ts`; the config module seam is `loadDeployctlConfig(path)` in `src/core/config.ts`.
 
 Expected implementation conventions from the proposal:
 
@@ -218,13 +225,16 @@ Current paths:
 - `docs/multi-tenant-deployment-explainer.md`: explanatory companion for the same architecture.
 - `AGENTS.md`: local instructions for agents; points agents to the architecture proposal.
 - `CONTEXT.md`: concise project context and implementation guardrails.
+- `src/cli.ts`: CLI entrypoint and initial dispatch.
+- `src/core/config.ts`: project config loading and validation.
+- `src/shared.ts`: shared errors and IO formatting.
+- `test/cli.test.ts`: public `deployctl --help` behavior test.
+- `test/config.test.ts`: config loading and validation behavior tests.
+- `package.json`, `package-lock.json`, `tsconfig.json`: Node package metadata and TypeScript configuration.
+- `deployctl.config.yml`: project-wide config for AWS region, app repository, build commands, deploy history/artifact locations, ref policies, and retention settings. Some values are placeholders until Phase 0 discovery confirms them.
 
 Proposed paths from the architecture, not yet created (see the target repo structure in `docs/implementation-plan.md`):
 
-- `src/`: TypeScript CLI entrypoint, command controllers, core orchestration modules, and AWS adapters.
-- `test/`: public-behavior-first tests mirroring `src/`.
-- `package.json`, `tsconfig.json`: Node package metadata and TypeScript configuration.
-- `deployctl.config.yml`: project-wide config for AWS region, app repository, build commands, deploy history/artifact locations, ref policies, target-selection/log patterns once confirmed, and retention settings.
 - `tenants.yml`: tenant registry with environment/tenant resource mappings.
 - `bitbucket-pipelines.yml`: pipeline entry points for invoking the CLI.
 - `scripts/`: small remote scripts, especially EC2-local commands invoked through SSM.
@@ -240,12 +250,13 @@ Proposed runtime paths, not repository paths:
 
 ## Exact Commands
 
-No code exists yet, so there are no verified local development commands. The intended commands once the Phase 1 scaffold lands (record them here as verified when they work):
+Verified local development commands:
 
 ```bash
 npm test
 npm run typecheck
 node --import tsx src/cli.ts --help
+node --import tsx src/cli.ts config check
 ```
 
 Proposed operator commands from the architecture:
@@ -263,14 +274,12 @@ deployctl cleanup releases --env production --dry-run
 deployctl cleanup artifacts --env production --dry-run
 ```
 
-When implementation begins, update this section with exact verified commands, such as install, lint, typecheck, unit tests, integration tests, and CLI smoke tests.
+Update this section as new phases add linting, integration tests, CLI smoke tests, or AWS-adapter tests.
 
 ## Known Gaps And Open Questions
 
 Repository gaps:
 
-- No code exists yet; the repo is docs-only.
-- No project config exists yet.
 - No tenant registry exists yet.
 - No deploy scripts exist yet.
 - No Bitbucket pipeline config exists yet.
