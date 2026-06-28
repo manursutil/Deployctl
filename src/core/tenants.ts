@@ -96,6 +96,22 @@ export function listTenants(registry: TenantRegistry, environment: string): stri
   return Object.keys(tenants).sort();
 }
 
+export function getTenantConfig(registry: TenantRegistry, environment: string, tenant: string): TenantConfig {
+  const tenants = registry[environment];
+
+  if (tenants === undefined) {
+    throw new DeployctlError(`Environment not found in tenants config: ${environment}`);
+  }
+
+  const config = tenants[tenant];
+
+  if (config === undefined) {
+    throw new DeployctlError(`Tenant not found in ${environment}: ${tenant}`);
+  }
+
+  return config;
+}
+
 function tenantConfig(value: unknown, path: string): TenantConfig {
   const object = objectAt(value, path);
   const config = {} as Record<(typeof requiredTenantFields)[number], string>;

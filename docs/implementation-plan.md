@@ -253,12 +253,22 @@ Backend and frontend deploy commands (Phases 6-7) must not ship until the shared
 
 ## Phase 6: Backend Deploy
 
-Status: `Not started`
+Status: `In progress`
 
 Goal: deploy backend releases through AWS SSM to staging EC2 or production ASG instances.
 
-Tasks:
+Progress:
 
+- Added per-environment SSM target selection to `deployctl.config.yml` (`ssmTargets`, discriminated by `mode`: `instanceIds` | `asg`) with strict validation in `src/core/config.ts`.
+- Added `src/core/deploy.ts` with `deployBackend(input)`: a deep orchestration module that validates the tenant, resolves the ref to an immutable commit, takes/clears the `inProgress` guardrail, runs the deploy through the `SsmDeployExecutor` seam, and records an append-only event plus current-state update. A failure (executor throw or all-instance failure) records a failure event and always clears the guardrail, leaving no partial state.
+- Added `getTenantConfig(registry, env, tenant)` to `src/core/tenants.ts` for single-tenant lookup.
+- Tests cover success, guardrail conflict, executor-throw failure, and partial_failure status (AWS work mocked behind the executor seam).
+
+- Added the `deployctl deploy backend --tenant <t> --env <e> --ref <ref>` CLI controller. It validates required flags, tenant/env existence, and a configured SSM target selector offline (no AWS or network), then fails clearly that AWS execution is still pending. This keeps the seam in place for the adapters below without faking a deploy.
+
+Still pending (needs Phase 0 confirmation of real infra values before it can be verified end to end):
+
+- Implement the `SsmDeployExecutor` AWS adapter (`src/adapters/ssm.ts`) over SSM Run Command, resolving `asg` targets to healthy instances at runtime, and wire it (plus an S3-backed `DeployHistoryRepository`) into the CLI controller.
 - Write EC2-local backend deploy script.
 - Prepare `/opt/sherwood/releases/<commit>`.
 - Install dependencies and build once per release.

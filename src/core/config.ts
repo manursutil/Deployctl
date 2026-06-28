@@ -18,11 +18,16 @@ export type DeployctlConfig = {
   deployHistory: StorageLocation;
   frontendArtifacts: StorageLocation;
   refPolicies: Record<string, RefPolicy>;
+  ssmTargets: Record<string, SsmTargetSelector>;
   retention: {
     successfulVersionsPerTarget: number;
     keepDays: number;
   };
 };
+
+export type SsmTargetSelector =
+  | { mode: "instanceIds"; instanceIds: string[] }
+  | { mode: "asg"; autoScalingGroupName: string };
 
 type BuildConfig = {
   packageManager: string;
@@ -86,6 +91,7 @@ export function parseDeployctlConfig(value: unknown, sourceName = "deployctl.con
     deployHistory: storageLocation(root.deployHistory, `${sourceName}.deployHistory`),
     frontendArtifacts: storageLocation(root.frontendArtifacts, `${sourceName}.frontendArtifacts`),
     refPolicies: refPolicies(root.refPolicies, `${sourceName}.refPolicies`),
+    ssmTargets: ssmTargets(root.ssmTargets, `${sourceName}.ssmTargets`),
     retention: {
       successfulVersionsPerTarget: positiveInteger(
         retention.successfulVersionsPerTarget,
@@ -130,6 +136,36 @@ function refPolicies(value: unknown, path: string): Record<string, RefPolicy> {
   }
 
   return policies;
+}
+
+function ssmTargets(value: unknown, path: string): Record<string, SsmTargetSelector> {
+  const object = objectAt(value, path);
+  const selectors: Record<string, SsmTargetSelector> = {};
+
+  for (const [environment, selector] of Object.entries(object)) {
+    selectors[environment] = ssmTargetSelector(selector, `${path}.${environment}`);
+  }
+
+  if (Object.keys(selectors).length === 0) {
+    throw new DeployctlError(`${path} must define at least one environment target selector`);
+  }
+
+  return selectors;
+}
+
+function ssmTargetSelector(value: unknown, path: string): SsmTargetSelector {
+  const object = objectAt(value, path);
+  const mode = object.mode;
+
+  if (mode === "instanceIds") {
+    return { mode, instanceIds: stringArray(object.instanceIds, `${path}.instanceIds`) };
+  }
+
+  if (mode === "asg") {
+    return { mode, autoScalingGroupName: nonEmptyString(object, `${path}.autoScalingGroupName`, "autoScalingGroupName") };
+  }
+
+  throw new DeployctlError(`${path}.mode must be "instanceIds" or "asg"`);
 }
 
 function stringArray(value: unknown, path: string): string[] {
