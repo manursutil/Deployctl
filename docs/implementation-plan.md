@@ -161,18 +161,25 @@ Done when: `npm test` and `npm run typecheck` run clean, `deployctl --help` prin
 
 ## Phase 2: Tenant Registry
 
-Status: `Not started`
+Status: `Done`
 
 Goal: load and validate `tenants.yml` without exposing or storing secret values.
 
 Tasks:
 
-- Define initial `tenants.yml` schema.
-- Parse YAML config.
-- Validate environments and tenants.
-- Validate required resource references.
-- Reject likely secret values in config.
-- Implement `deployctl tenants list --env <env>`.
+- [x] Define initial `tenants.yml` schema.
+- [x] Parse YAML config.
+- [x] Validate environments and tenants.
+- [x] Validate required resource references.
+- [x] Reject likely secret values in config.
+- [x] Implement `deployctl tenants list --env <env>`.
+
+Completed:
+
+- Added `src/core/tenants.ts` with `loadTenantRegistry(path)`, `parseTenantRegistry(value)`, and `listTenants(registry, environment)`.
+- Added initial `tenants.yml` with resource references only; no secret values.
+- Added `deployctl tenants list --env <env> [--tenants <path>]`.
+- Added tests for listing tenants, missing config, required tenant resource references, and likely secret value rejection.
 
 Done when: `deployctl tenants list --env staging` prints the configured tenants for a valid config, and exits non-zero with a clear message on an invalid or missing config, both covered by a test.
 
