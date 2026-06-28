@@ -48,8 +48,8 @@ export type DeployInstanceResult = {
 };
 
 export type CurrentState = DeployTarget & {
-  currentVersion: string;
-  lastSuccessfulEventId: string;
+  currentVersion: string | null;
+  lastSuccessfulEventId: string | null;
   updatedAt: string;
   inProgress?: InProgressState;
 };
@@ -146,8 +146,8 @@ export function validateCurrentState(value: unknown): CurrentState {
   const object = objectAt(value, "current state");
   const state: CurrentState = {
     ...targetFrom(object, "current state"),
-    currentVersion: commitSha(object.currentVersion, "current state.currentVersion"),
-    lastSuccessfulEventId: nonEmptyString(object.lastSuccessfulEventId, "current state.lastSuccessfulEventId"),
+    currentVersion: nullableCommitSha(object.currentVersion, "current state.currentVersion"),
+    lastSuccessfulEventId: nullableString(object.lastSuccessfulEventId, "current state.lastSuccessfulEventId"),
     updatedAt: isoTimestamp(object.updatedAt, "current state.updatedAt"),
   };
 
@@ -319,6 +319,22 @@ function commitSha(value: unknown, path: string): string {
   }
 
   return string.toLowerCase();
+}
+
+function nullableCommitSha(value: unknown, path: string): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  return commitSha(value, path);
+}
+
+function nullableString(value: unknown, path: string): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  return nonEmptyString(value, path);
 }
 
 function configKey(value: unknown, path: string): string {

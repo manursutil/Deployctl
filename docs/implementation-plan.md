@@ -227,7 +227,7 @@ Completed:
 
 ## Phase 5: Deployment Guardrail
 
-Status: `Not started`
+Status: `Done`
 
 Goal: prevent concurrent deploys or rollbacks for the same `<env>/<tenant>/<app>` target.
 
@@ -235,10 +235,17 @@ Decision: no DynamoDB and no S3 lock objects. Use a lightweight `inProgress`/`si
 
 Tasks:
 
-- Add `inProgress`/`since` fields to the current-state schema (Phase 4).
-- Check and set the guardrail at the start of deploy/rollback orchestration; clear it on completion or failure.
-- Surface a clear "deploy already in progress" error when blocked.
-- Document that this narrows the DynamoDB/S3 lock design in the architecture proposal section 22, given a single-user dashboard as the primary caller.
+- [x] Add `inProgress`/`since` fields to the current-state schema (Phase 4).
+- [x] Check and set the guardrail at the start of deploy/rollback orchestration; clear it on completion or failure.
+- [x] Surface a clear "deploy already in progress" error when blocked.
+- [x] Document that this narrows the DynamoDB/S3 lock design in the architecture proposal section 22, given a single-user dashboard as the primary caller.
+
+Completed:
+
+- Added `src/core/guardrail.ts` with `startDeploymentGuardrail(...)` and `clearDeploymentGuardrail(...)`.
+- The guardrail uses `CurrentState.inProgress` on the existing history repository seam; no DynamoDB table or S3 lock object is introduced.
+- The guardrail can create a current-state record before the first successful deploy; in that case `currentVersion` and `lastSuccessfulEventId` are `null` until success.
+- Added tests for setting the guardrail, rejecting an already-running target, and clearing only the matching in-progress event.
 
 ## Deploy Prerequisites
 

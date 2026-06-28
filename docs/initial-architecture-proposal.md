@@ -1205,13 +1205,11 @@ Rollback syncs that old artifact back into the tenant's frontend bucket.
 
 This is why deploy history and retention are important. The tool needs to know which old versions exist and which one was previously deployed.
 
-## 22. Deployment Locks
-
-Note: section 6a narrows this decision for the dashboard's single-user concurrency guardrail, using an `inProgress` field on `current.json` instead of DynamoDB or S3 locks. This section's analysis still applies to the CLI/pipeline-driven locking model described here.
+## 22. Deployment Guardrail
 
 Version 1 should prevent two deploys or rollbacks from changing the same tenant application at the same time.
 
-The lock should be specific to one deployment target:
+The guardrail should be specific to one deployment target:
 
 ```text
 <env>/<tenant>/<app>
@@ -1228,7 +1226,7 @@ production/client2/backend
 
 This means a backend deploy for `production/client1` blocks another backend deploy or rollback for `production/client1`, but it does not block unrelated deploys such as `production/client2/backend` or `production/client1/frontend`.
 
-The lock should cover the whole deploy or rollback operation:
+The guardrail should cover the whole deploy or rollback operation:
 
 ```text
 1. resolve ref
@@ -1237,12 +1235,12 @@ The lock should cover the whole deploy or rollback operation:
 4. update symlink or sync frontend bucket
 5. run health/smoke check
 6. write deploy history/current state
-7. release lock
+7. clear guardrail
 ```
 
 Why:
 
-Without a lock, two Bitbucket pipelines or operators can deploy the same tenant/app at the same time. That can create race conditions where one deploy updates the server while another deploy overwrites deploy history, or where rollback chooses the wrong previous version.
+Without a guardrail, two Bitbucket pipelines or operators can deploy the same tenant/app at the same time. That can create race conditions where one deploy updates the server while another deploy overwrites deploy history, or where rollback chooses the wrong previous version.
 
 Example bad outcome:
 
@@ -1258,101 +1256,33 @@ A finishes later and writes current state.
 
 The server may now be running one version while deploy history says another. That makes status and rollback unreliable.
 
-### Recommended Lock Store: DynamoDB
-
-Use a small DynamoDB table for deployment locks.
-
-Example lock item:
+Decision for this project:
 
 ```json
 {
-  "lockKey": "production/client1/backend",
-  "deployId": "dep_20260617_101500",
-  "startedBy": "bitbucket-pipelines",
-  "startedAt": "2026-06-17T10:15:00Z",
-  "expiresAt": 1781693100
+  "inProgress": {
+    "eventId": "dep_20260617_101500",
+    "since": "2026-06-17T10:15:00Z",
+    "actor": "bitbucket-pipelines"
+  }
 }
 ```
 
-`deployctl` should acquire the lock with a conditional write:
+Use the `inProgress` field on the existing `current.json` current-state record. Do not add a DynamoDB lock table or separate S3 lock objects in version 1. This matches the single-user dashboard requirement in section 6a and keeps the deploy-history/current-state store as the single operational record for the target.
 
-```text
-Create this lock only if no active lock already exists for this lockKey.
-```
+When a deploy or rollback starts, the orchestration module reads the current-state record. If `inProgress` is already set for that target, it refuses with a clear "deploy already in progress" error. Otherwise it writes `inProgress`, performs the deploy or rollback work, and clears `inProgress` on success or failure.
 
-That conditional write is atomic, so if two deploys start at the same time, only one can acquire the lock.
+Stale guardrail handling:
 
-Pros:
-
-- Correct tool for this kind of coordination.
-- Atomic conditional writes are straightforward.
-- Lock records are easy to inspect.
-- TTL can help clean up expired locks.
-- Keeps deploy history in S3 while using DynamoDB only for coordination.
-
-Cons:
-
-- Adds a small AWS resource.
-- Requires Terraform or manual setup unless an existing table can be reused.
-- Requires IAM permissions for the deploy pipeline/operator.
-- Slightly more setup than using only S3.
-
-### Fallback Lock Store: S3
-
-If adding DynamoDB is not acceptable, use an S3 lock object.
-
-Example:
-
-```text
-s3://skincair-<env>-deploy-history/locks/production/client1/backend.lock
-```
-
-The lock object should contain metadata similar to the DynamoDB item:
-
-```json
-{
-  "lockKey": "production/client1/backend",
-  "deployId": "dep_20260617_101500",
-  "startedBy": "bitbucket-pipelines",
-  "startedAt": "2026-06-17T10:15:00Z",
-  "expiresAt": "2026-06-17T10:45:00Z"
-}
-```
-
-`deployctl` must create the object only if it does not already exist. This must be implemented carefully with the AWS SDK so two pipelines cannot both believe they acquired the same lock.
-
-Pros:
-
-- Reuses the deploy-history S3 bucket.
-- Avoids adding DynamoDB.
-- Simple to inspect manually.
-- Good enough for low deploy volume if implemented carefully.
-
-Cons:
-
-- Easier to implement incorrectly than DynamoDB.
-- Stale lock cleanup is less natural.
-- S3 is not primarily a coordination service.
-- Concurrent create semantics must be tested carefully.
-
-Stale lock handling:
-
-Deploys can fail before releasing a lock if a pipeline is cancelled, an operator machine disconnects, or an SSM command times out. Every lock should therefore have an expiration time.
-
-For version 1, expired locks should not be silently overwritten. `deployctl` should show the stale lock and require an explicit unlock command:
-
-```bash
-deployctl locks list --env production
-deployctl locks unlock production/client1/backend --force
-```
+Deploys can fail before clearing the guardrail if a pipeline is cancelled, an operator machine disconnects, or an SSM command times out. Version 1 should show the stale `inProgress` record and require an explicit operator action to clear or retry it; it should not silently overwrite an active guardrail.
 
 Decision:
 
-> Version 1 includes deployment locks for every deploy and rollback, keyed by `<env>/<tenant>/<app>`. Use DynamoDB conditional writes as the recommended lock mechanism. If adding DynamoDB is not acceptable, use carefully implemented S3 lock objects as a fallback.
+> Version 1 includes a deployment guardrail for every deploy and rollback, keyed by `<env>/<tenant>/<app>`. The guardrail is the `inProgress` field on that target's `current.json` record. DynamoDB and S3 lock objects are not used.
 
 Beginner explanation:
 
-A deployment lock is like saying:
+A deployment guardrail is like saying:
 
 ```text
 Someone is already changing production/client1/backend.

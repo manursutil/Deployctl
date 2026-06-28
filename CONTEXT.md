@@ -136,7 +136,7 @@ The current proposed operational domain model is:
 - Frontend artifact: static build output stored by resolved commit plus tenant/env/config identity because v1 bakes tenant variables into the bundle at build time.
 - Tenant frontend bucket: tenant-specific S3 bucket receiving the deployed frontend files.
 - Deploy event: append-only JSON record of a deploy, rollback, failure, or partial failure.
-- Current state: mutable JSON record describing the desired/current version for one tenant/app, including the `inProgress`/`since` concurrency guardrail.
+- Current state: mutable JSON record describing the desired/current version for one tenant/app, including the `inProgress`/`since` concurrency guardrail. Before the first successful deploy, a current-state record may exist only to hold `inProgress`; `currentVersion` and `lastSuccessfulEventId` are then `null`.
 
 No primary keys, foreign keys, or cascade rules exist yet because there is no persisted relational schema in this repo.
 
@@ -194,6 +194,7 @@ Implemented patterns:
 - Tenant registry callers should use `loadTenantRegistry(path)` and `listTenants(registry, environment)` from `src/core/tenants.ts` rather than parsing YAML in command code.
 - Ref resolution callers should use `resolveDeploymentRef(input)` from `src/core/refs.ts`. Core enforces environment ref policy and returns both `requestedRef` and immutable `resolvedCommit`; Git access stays behind the `RefResolver` adapter interface.
 - History callers should use the `DeployHistoryRepository` seam from `src/core/history.ts`. Append-only events and mutable current state are separate operations; successful deploy/rollback events update current state through `applySuccessfulEventToCurrentState(...)`.
+- Deploy and rollback orchestration must call `startDeploymentGuardrail(...)` before work starts and `clearDeploymentGuardrail(...)` on completion or failure. The guardrail lives in `CurrentState.inProgress`, scoped per `env/tenant/app`.
 
 Expected implementation conventions from the proposal:
 
@@ -215,7 +216,7 @@ Suggested future module seams, once code exists:
 - CLI command parsing.
 - Tenant config loading and validation: implemented in `src/core/tenants.ts`.
 - Git/Bitbucket ref resolution: implemented in `src/core/refs.ts` with Git access isolated in `src/adapters/git.ts`.
-- Concurrency guardrail (`inProgress`/`since` on `current.json`).
+- Concurrency guardrail (`inProgress`/`since` on `current.json`): implemented in `src/core/guardrail.ts`.
 - Deploy history/current-state repository: core schemas and repository seam are implemented in `src/core/history.ts`; S3 persistence adapter is still pending.
 - Backend SSM deployment orchestration.
 - Frontend artifact and S3 sync orchestration.
