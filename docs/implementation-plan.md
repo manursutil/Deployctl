@@ -133,21 +133,29 @@ Keep architectural invariants in code and tests, not as broad config switches:
 
 ## Phase 1: CLI Foundation
 
-Status: `Not started`
+Status: `Done`
 
 Goal: create a safe TypeScript CLI scaffold with no AWS side effects, starting from an empty repo (only `docs/`, `AGENTS.md`, and `CONTEXT.md` exist).
 
 Tasks:
 
-- Add npm package scaffold and TypeScript configuration.
-- Add a minimal CLI entrypoint at `src/cli.ts`.
-- Add `deployctl.config.yml` schema/types and a loader that validates YAML into a typed config object without AWS side effects.
-- Add one public CLI behavior test (for example `--help`).
-- Add command parser structure when the next public behavior is chosen.
-- Add shared output and error conventions.
-- Add thin command handlers that fail clearly until implemented.
-- Keep implementation behind stable interfaces where Phase 0 decisions are still open.
-- Record verified commands (test, typecheck, CLI invocation) in `CONTEXT.md`.
+- [x] Add npm package scaffold and TypeScript configuration.
+- [x] Add a minimal CLI entrypoint at `src/cli.ts`.
+- [x] Add `deployctl.config.yml` schema/types and a loader that validates YAML into a typed config object without AWS side effects.
+- [x] Add one public CLI behavior test (for example `--help`).
+- [x] Add command parser structure when the next public behavior is chosen.
+- [x] Add shared output and error conventions.
+- [x] Add thin command handlers that fail clearly until implemented.
+- [x] Keep implementation behind stable interfaces where Phase 0 decisions are still open.
+- [x] Record verified commands (test, typecheck, CLI invocation) in `CONTEXT.md`.
+
+Completed:
+
+- Added a TypeScript ESM npm scaffold with Node's built-in test runner through `node --import tsx --test`.
+- Added `src/cli.ts` with a public `runCli(argv, io)` entrypoint, `--help`, `config check`, and clear non-implemented command failures.
+- Added `src/core/config.ts` with `loadDeployctlConfig(path)` and strict YAML validation into `DeployctlConfig`.
+- Added tests for public CLI help behavior and config loading/validation.
+- Added initial `deployctl.config.yml` with placeholder operational values to keep Phase 0 decisions explicit and editable.
 
 Done when: `npm test` and `npm run typecheck` run clean, `deployctl --help` prints usage, and `deployctl.config.yml` loading/validation is covered by tests without making AWS calls.
 

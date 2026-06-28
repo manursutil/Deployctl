@@ -1,0 +1,36 @@
+aws:
+  region: eu-west-1
+
+applicationRepository:
+  url: ssh://git@bitbucket.org/example/application-monorepo.git
+
+build:
+  backend:
+    packageManager: npm
+    installCommand: npm ci
+    buildCommand: npm run build
+  frontend:
+    packageManager: npm
+    installCommand: npm ci
+    buildCommand: npm run build
+    buildConfigIdentityInputs:
+      - VITE_TENANT
+      - VITE_ENVIRONMENT
+
+deployHistory:
+  bucket: skincair-staging-deploy-history
+  prefix: deploys
+
+frontendArtifacts:
+  bucket: skincair-staging-deploy-artifacts
+  prefix: frontend
+
+refPolicies:
+  staging:
+    allowMovingBranches: true
+  production:
+    allowMovingBranches: false
+
+retention:
+  successfulVersionsPerTarget: 10
+  keepDays: 30
