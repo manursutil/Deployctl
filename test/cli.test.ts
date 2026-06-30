@@ -92,3 +92,25 @@ test("deployctl deploy backend validates inputs and reports that AWS execution i
   assert.equal(result.status, 1);
   assert.match(result.stderr, /not yet executable/);
 });
+
+test("deployctl deploy frontend rejects an unknown tenant before any AWS work", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "src/cli.ts", "deploy", "frontend", "--tenant", "ghost", "--env", "staging", "--ref", "main"],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Tenant not found in staging: ghost/);
+});
+
+test("deployctl deploy frontend validates inputs and reports that AWS execution is still pending", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "src/cli.ts", "deploy", "frontend", "--tenant", "client1", "--env", "staging", "--ref", "main"],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /not yet executable/);
+});
