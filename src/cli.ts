@@ -55,6 +55,10 @@ export async function runCli(argv: string[], io: Io = { stdout: process.stdout, 
       return await runDeployBackend(args, io);
     }
 
+    if (args[0] === "deploy" && args[1] === "frontend") {
+      return await runDeployFrontend(args, io);
+    }
+
     throw new DeployctlError(`Command not implemented yet: ${args.join(" ")}`);
   } catch (error) {
     io.stderr.write(`${formatError(error)}\n`);
@@ -86,6 +90,29 @@ async function runDeployBackend(args: string[], io: Io): Promise<number> {
   // confirmation, so no real deploy runs yet.
   throw new DeployctlError(
     `Backend deploy for ${environment}/${tenant} is not yet executable: the SSM executor and S3 deploy history adapters are pending (Phase 6).`,
+  );
+}
+
+async function runDeployFrontend(args: string[], io: Io): Promise<number> {
+  const tenant = requiredOption(args, "--tenant");
+  const environment = requiredOption(args, "--env");
+  const requestedRef = requiredOption(args, "--ref");
+
+  await loadDeployctlConfig(optionValue(args, "--config") ?? "deployctl.config.yml");
+  const registry = await loadTenantRegistry(optionValue(args, "--tenants") ?? "tenants.yml");
+
+  // Validate the tenant/env (and that it has a frontend bucket/URL) offline
+  // before reporting the pending boundary.
+  getTenantConfig(registry, environment, tenant);
+
+  io.stdout.write(`Validated frontend deploy for ${environment}/${tenant} (ref ${requestedRef}).\n`);
+
+  // The orchestration module (deployFrontend) is implemented and unit-tested
+  // behind the artifact-store, builder, sync, and smoke-check seams, but the
+  // production S3/build adapters and the build-variable source are still pending
+  // Phase 0 confirmation, so no real deploy runs yet.
+  throw new DeployctlError(
+    `Frontend deploy for ${environment}/${tenant} is not yet executable: the S3 artifact/sync and build adapters are pending (Phase 7).`,
   );
 }
 

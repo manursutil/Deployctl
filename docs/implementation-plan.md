@@ -280,22 +280,26 @@ Still pending (needs Phase 0 confirmation of real infra values before it can be 
 
 ## Phase 7: Frontend Artifact And Deploy
 
-Status: `Not started`
+Status: `In progress`
 
 Goal: build or reuse tenant/env-specific frontend artifacts and sync them to tenant S3 buckets.
 
 Decision: v1 keeps the current frontend model where tenant/environment variables are baked into the static bundle at build time. Runtime config would be cleaner for artifact reuse, but it would require changing all frontend clients before `deployctl` can ship. Therefore v1 artifacts must be keyed by resolved commit plus tenant/environment or a build-config fingerprint, not by commit SHA alone.
 
-Tasks:
+Decision (artifact identity): the artifact fingerprint is a hash over the resolved commit plus env, tenant, and the exact resolved build-variable `name=value` pairs (`frontendArtifactKey`). Two builds differ if any build value differs, so one tenant's build cannot be reused for another. The build-variable *values* are passed into the orchestration as input; their source (derived from env/tenant) is a Phase 0 confirmation, kept out of the core so the identity logic stays pure and testable.
 
-- Define artifact storage layout.
-- Include tenant/environment/build-config identity in the artifact key so one tenant's build cannot be reused for another tenant by accident.
-- Check whether artifact exists for the resolved commit and exact tenant/env build config.
-- Build and store missing artifacts using the tenant/env build-time variables from config.
-- Sync artifact files to tenant frontend bucket.
-- Apply explicit cache headers.
+Progress:
+
+- Added `src/core/frontend.ts` with `frontendArtifactKey` / `frontendArtifactStorageKey` (artifact identity + S3 key layout `frontend/<commit>/<env>/<tenant>-<fingerprint>.tar.gz`).
+- Added `deployFrontend(input)`: a deep orchestration module over `FrontendArtifactStore`, `FrontendBuilder`, `FrontendSync`, and `FrontendSmokeCheck` seams. It resolves the ref, computes the artifact identity, reuses or builds the artifact, syncs to the tenant bucket, smoke checks, and records an append-only event plus current state, always clearing the `inProgress` guardrail.
+- Added the `deployctl deploy frontend` CLI controller (validates flags + tenant/env offline, then fails clearly that AWS execution is pending).
+- Tests cover deterministic/sensitive artifact identity, build-vs-reuse, smoke-check failure, guardrail conflict, and CLI input validation (AWS work mocked behind the seams).
+
+Still pending (needs Phase 0 confirmation + real AWS before it can be verified end to end):
+
+- Implement the S3 `FrontendArtifactStore` and `FrontendSync` adapters (`src/adapters/s3.ts`) with explicit cache headers, the real `FrontendBuilder`, and an HTTP `FrontendSmokeCheck`, then wire them into the CLI controller.
+- Confirm the frontend build-variable values and their source per tenant/env (Phase 0), and supply them to `deployFrontend`.
 - Do not introduce runtime config in v1; record it as a future improvement once the frontend can read a public config file at startup.
-- Run frontend smoke check.
 
 ## Phase 8: Rollback
 

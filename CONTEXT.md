@@ -33,6 +33,7 @@ Current files:
 - `src/core/refs.ts`: deployment ref resolution policy that returns immutable commit metadata.
 - `src/core/history.ts`: deploy/rollback event schemas, current-state schema, repository seam, in-memory repository, and previous-version lookup.
 - `src/core/deploy.ts`: backend deploy orchestration (`deployBackend`) over the `SsmDeployExecutor` seam; wires tenant lookup, ref resolution, the `inProgress` guardrail, and deploy history.
+- `src/core/frontend.ts`: frontend artifact identity (`frontendArtifactKey`/`frontendArtifactStorageKey`) and deploy orchestration (`deployFrontend`) over the `FrontendArtifactStore`, `FrontendBuilder`, `FrontendSync`, and `FrontendSmokeCheck` seams.
 - `src/adapters/git.ts`: Git CLI adapter for resolving refs from the application repository.
 - `src/shared.ts`: shared CLI errors, IO, and formatting helpers.
 - `tenants.yml`: initial tenant registry with resource references only.
@@ -198,6 +199,7 @@ Implemented patterns:
 - Deploy and rollback orchestration must call `startDeploymentGuardrail(...)` before work starts and `clearDeploymentGuardrail(...)` on completion or failure. The guardrail lives in `CurrentState.inProgress`, scoped per `env/tenant/app`.
 - Backend deploy callers should use `deployBackend(input)` from `src/core/deploy.ts`. It accepts its dependencies (config, registry, ref resolver, history repository, and an `SsmDeployExecutor`) rather than creating them, so the CLI and the future dashboard call the same module and tests mock the AWS work behind the executor seam. All real SSM/secret work lives behind `SsmDeployExecutor`; orchestration only passes resolved facts and resource references — never secret values.
 - SSM Run Command targets are selected per environment via `deployctl.config.yml` `ssmTargets`, a discriminated selector (`mode: instanceIds` with `instanceIds`, or `mode: asg` with `autoScalingGroupName`). Identifiers are placeholders until Phase 0 confirms them; the selector shape is fixed in code.
+- Frontend deploy callers should use `deployFrontend(input)` from `src/core/frontend.ts`, with the same dependency-injection shape (config, registry, ref resolver, history, plus the artifact-store/builder/sync/smoke-check seams). The v1 artifact identity is `frontendArtifactKey`: a fingerprint over the resolved commit and the exact env/tenant/build-variable values, so one tenant's build is never reused for another. Build-variable values are passed in as input; their source is a Phase 0 confirmation kept out of the core.
 
 Expected implementation conventions from the proposal:
 
@@ -278,9 +280,10 @@ node --import tsx src/cli.ts --help
 node --import tsx src/cli.ts config check
 node --import tsx src/cli.ts tenants list --env staging
 node --import tsx src/cli.ts deploy backend --tenant client1 --env staging --ref main
+node --import tsx src/cli.ts deploy frontend --tenant client1 --env staging --ref main
 ```
 
-The `deploy backend` command currently validates inputs offline (tenant/env existence and a configured SSM target selector) and then fails clearly that AWS execution is still pending; it makes no AWS or network calls until the SSM executor and S3 history adapters land.
+The `deploy backend` and `deploy frontend` commands currently validate inputs offline (tenant/env existence, and for backend a configured SSM target selector) and then fail clearly that AWS execution is still pending; they make no AWS or network calls until the SSM/S3/build adapters land.
 
 Proposed operator commands from the architecture:
 

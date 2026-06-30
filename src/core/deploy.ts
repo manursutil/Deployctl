@@ -2,6 +2,8 @@ import { DeployctlError, formatError } from "../shared.js";
 import type { DeployctlConfig, SsmTargetSelector } from "./config.js";
 import {
   applySuccessfulEventToCurrentState,
+  formatDeployEventId,
+  newDeployEvent,
   type DeployEvent,
   type DeployEventStatus,
   type DeployHistoryRepository,
@@ -85,7 +87,7 @@ export async function deployBackend(input: DeployBackendInput): Promise<DeployBa
   });
 
   const startedAt = clock();
-  const eventId = (input.generateEventId ?? defaultEventId)(startedAt);
+  const eventId = (input.generateEventId ?? formatDeployEventId)(startedAt);
 
   await startDeploymentGuardrail(input.history, target, {
     eventId,
@@ -106,8 +108,15 @@ export async function deployBackend(input: DeployBackendInput): Promise<DeployBa
         applicationRepositoryUrl: input.config.applicationRepository.url,
       });
     } catch (error) {
-      const event = buildEvent(target, resolved.requestedRef, resolved.resolvedCommit, input.actor, eventId, startedAt, clock(), {
+      const event = newDeployEvent({
+        target,
+        eventId,
+        requestedRef: resolved.requestedRef,
+        resolvedCommit: resolved.resolvedCommit,
+        actor: input.actor,
         status: "failure",
+        startedAt,
+        finishedAt: clock(),
         errorMessage: formatError(error),
       });
       await input.history.appendEvent(event);
@@ -117,8 +126,15 @@ export async function deployBackend(input: DeployBackendInput): Promise<DeployBa
     }
 
     const status = overallStatus(outcome.instances);
-    const event = buildEvent(target, resolved.requestedRef, resolved.resolvedCommit, input.actor, eventId, startedAt, clock(), {
+    const event = newDeployEvent({
+      target,
+      eventId,
+      requestedRef: resolved.requestedRef,
+      resolvedCommit: resolved.resolvedCommit,
+      actor: input.actor,
       status,
+      startedAt,
+      finishedAt: clock(),
       ssmCommandId: outcome.ssmCommandId,
       instances: outcome.instances,
     });
@@ -147,42 +163,3 @@ function overallStatus(instances: DeployInstanceResult[]): DeployEventStatus {
   return "partial_failure";
 }
 
-function buildEvent(
-  target: DeployTarget,
-  requestedRef: string,
-  resolvedCommit: string,
-  actor: string,
-  eventId: string,
-  startedAt: Date,
-  finishedAt: Date,
-  extra: { status: DeployEventStatus; ssmCommandId?: string; instances?: DeployInstanceResult[]; errorMessage?: string },
-): DeployEvent {
-  const event: DeployEvent = {
-    ...target,
-    eventId,
-    type: "deploy",
-    requestedRef,
-    resolvedCommit,
-    status: extra.status,
-    startedAt: startedAt.toISOString(),
-    finishedAt: finishedAt.toISOString(),
-    actor,
-  };
-
-  if (extra.ssmCommandId !== undefined) {
-    event.ssmCommandId = extra.ssmCommandId;
-  }
-  if (extra.instances !== undefined) {
-    event.instances = extra.instances;
-  }
-  if (extra.errorMessage !== undefined) {
-    event.errorMessage = extra.errorMessage;
-  }
-
-  return event;
-}
-
-function defaultEventId(startedAt: Date): string {
-  const iso = startedAt.toISOString();
-  return `dep_${iso.slice(0, 10).replace(/-/g, "")}_${iso.slice(11, 19).replace(/:/g, "")}`;
-}
