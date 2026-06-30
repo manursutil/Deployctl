@@ -174,6 +174,51 @@ export function applySuccessfulEventToCurrentState(event: DeployHistoryEvent, op
   });
 }
 
+/** Build a deploy event from orchestration inputs. Shared by backend and frontend deploys. */
+export function newDeployEvent(input: {
+  target: DeployTarget;
+  eventId: string;
+  requestedRef: string;
+  resolvedCommit: string;
+  actor: string;
+  status: DeployEventStatus;
+  startedAt: Date;
+  finishedAt: Date;
+  ssmCommandId?: string;
+  instances?: DeployInstanceResult[];
+  errorMessage?: string;
+}): DeployEvent {
+  const event: DeployEvent = {
+    ...input.target,
+    eventId: input.eventId,
+    type: "deploy",
+    requestedRef: input.requestedRef,
+    resolvedCommit: input.resolvedCommit,
+    status: input.status,
+    startedAt: input.startedAt.toISOString(),
+    finishedAt: input.finishedAt.toISOString(),
+    actor: input.actor,
+  };
+
+  if (input.ssmCommandId !== undefined) {
+    event.ssmCommandId = input.ssmCommandId;
+  }
+  if (input.instances !== undefined) {
+    event.instances = input.instances;
+  }
+  if (input.errorMessage !== undefined) {
+    event.errorMessage = input.errorMessage;
+  }
+
+  return event;
+}
+
+/** Deterministic `dep_YYYYMMDD_HHMMSS` event id from a start time. */
+export function formatDeployEventId(startedAt: Date): string {
+  const iso = startedAt.toISOString();
+  return `dep_${iso.slice(0, 10).replace(/-/g, "")}_${iso.slice(11, 19).replace(/:/g, "")}`;
+}
+
 export async function previousSuccessfulVersion(repository: DeployHistoryRepository, target: DeployTarget): Promise<string | undefined> {
   const current = await repository.readCurrentState(target);
   const events = await repository.listEvents(target);

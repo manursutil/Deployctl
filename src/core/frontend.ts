@@ -3,6 +3,8 @@ import { DeployctlError, formatError } from "../shared.js";
 import type { DeployctlConfig } from "./config.js";
 import {
   applySuccessfulEventToCurrentState,
+  formatDeployEventId,
+  newDeployEvent,
   type DeployEvent,
   type DeployEventStatus,
   type DeployHistoryRepository,
@@ -131,7 +133,7 @@ export async function deployFrontend(input: DeployFrontendInput): Promise<Deploy
   const storageKey = frontendArtifactStorageKey(input.config.frontendArtifacts.prefix, key);
 
   const startedAt = clock();
-  const eventId = (input.generateEventId ?? defaultEventId)(startedAt);
+  const eventId = (input.generateEventId ?? formatDeployEventId)(startedAt);
 
   await startDeploymentGuardrail(input.history, target, { eventId, since: startedAt.toISOString(), actor: input.actor });
 
@@ -153,7 +155,17 @@ export async function deployFrontend(input: DeployFrontendInput): Promise<Deploy
 
       await input.sync.sync({ bucket: tenant.frontendBucket, storageKey });
     } catch (error) {
-      const event = buildEvent(target, resolved.requestedRef, resolved.resolvedCommit, input.actor, eventId, startedAt, clock(), "failure", formatError(error));
+      const event = newDeployEvent({
+        target,
+        eventId,
+        requestedRef: resolved.requestedRef,
+        resolvedCommit: resolved.resolvedCommit,
+        actor: input.actor,
+        status: "failure",
+        startedAt,
+        finishedAt: clock(),
+        errorMessage: formatError(error),
+      });
       await input.history.appendEvent(event);
       throw error instanceof DeployctlError
         ? error
@@ -162,17 +174,17 @@ export async function deployFrontend(input: DeployFrontendInput): Promise<Deploy
 
     const healthy = await input.smokeCheck.check(tenant.frontendUrl);
     const status: DeployEventStatus = healthy ? "success" : "failure";
-    const event = buildEvent(
+    const event = newDeployEvent({
       target,
-      resolved.requestedRef,
-      resolved.resolvedCommit,
-      input.actor,
       eventId,
-      startedAt,
-      clock(),
+      requestedRef: resolved.requestedRef,
+      resolvedCommit: resolved.resolvedCommit,
+      actor: input.actor,
       status,
-      healthy ? undefined : `frontend smoke check failed: ${tenant.frontendUrl}`,
-    );
+      startedAt,
+      finishedAt: clock(),
+      errorMessage: healthy ? undefined : `frontend smoke check failed: ${tenant.frontendUrl}`,
+    });
 
     await input.history.appendEvent(event);
 
@@ -184,39 +196,4 @@ export async function deployFrontend(input: DeployFrontendInput): Promise<Deploy
   } finally {
     await clearDeploymentGuardrail(input.history, target, eventId);
   }
-}
-
-function buildEvent(
-  target: DeployTarget,
-  requestedRef: string,
-  resolvedCommit: string,
-  actor: string,
-  eventId: string,
-  startedAt: Date,
-  finishedAt: Date,
-  status: DeployEventStatus,
-  errorMessage?: string,
-): DeployEvent {
-  const event: DeployEvent = {
-    ...target,
-    eventId,
-    type: "deploy",
-    requestedRef,
-    resolvedCommit,
-    status,
-    startedAt: startedAt.toISOString(),
-    finishedAt: finishedAt.toISOString(),
-    actor,
-  };
-
-  if (errorMessage !== undefined) {
-    event.errorMessage = errorMessage;
-  }
-
-  return event;
-}
-
-function defaultEventId(startedAt: Date): string {
-  const iso = startedAt.toISOString();
-  return `dep_${iso.slice(0, 10).replace(/-/g, "")}_${iso.slice(11, 19).replace(/:/g, "")}`;
 }
