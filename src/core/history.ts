@@ -63,6 +63,7 @@ export type InProgressState = {
 export type DeployHistoryRepository = {
   appendEvent(event: DeployHistoryEvent): Promise<void>;
   listEvents(target: DeployTarget): Promise<DeployHistoryEvent[]>;
+  tryStartDeployment(target: DeployTarget, inProgress: InProgressState): Promise<CurrentState>;
   readCurrentState(target: DeployTarget): Promise<CurrentState | undefined>;
   updateCurrentState(state: CurrentState): Promise<void>;
 };
@@ -253,6 +254,24 @@ export class InMemoryDeployHistoryRepository implements DeployHistoryRepository 
     return [...(this.events.get(targetKey(target)) ?? [])];
   }
 
+  async tryStartDeployment(target: DeployTarget, inProgress: InProgressState): Promise<CurrentState> {
+    const key = targetKey(target);
+    const current = this.currentStates.get(key);
+
+    if (current?.inProgress !== undefined) {
+      throw new DeployctlError(
+        `deploy already in progress for ${target.env}/${target.tenant}/${target.app}: ${current.inProgress.eventId} since ${current.inProgress.since}`,
+      );
+    }
+
+    const next = validateCurrentState({
+      ...(current ?? initialCurrentState(target, inProgress.since)),
+      inProgress,
+    });
+    this.currentStates.set(key, next);
+    return { ...next };
+  }
+
   async readCurrentState(target: DeployTarget): Promise<CurrentState | undefined> {
     const state = this.currentStates.get(targetKey(target));
     return state === undefined ? undefined : { ...state };
@@ -266,6 +285,15 @@ export class InMemoryDeployHistoryRepository implements DeployHistoryRepository 
 
 function targetKey(target: DeployTarget): string {
   return `${target.env}/${target.tenant}/${target.app}`;
+}
+
+function initialCurrentState(target: DeployTarget, timestamp: string): CurrentState {
+  return {
+    ...target,
+    currentVersion: null,
+    lastSuccessfulEventId: null,
+    updatedAt: timestamp,
+  };
 }
 
 function eventBase(value: unknown, path: string): Record<string, unknown> {
