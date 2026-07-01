@@ -154,6 +154,35 @@ test("deployFrontend reports failure and clears the guardrail when the smoke che
   assert.equal(events[0].status, "failure");
 });
 
+test("deployFrontend records a failure event and clears the guardrail when the smoke check throws", async () => {
+  const f = fakes({ exists: true });
+  const history = new InMemoryDeployHistoryRepository();
+  const target = { env: "staging", tenant: "client1", app: "frontend" as const };
+
+  await assert.rejects(
+    deployFrontend(
+      baseInput(f, {
+        history,
+        smokeCheck: {
+          async check() {
+            throw new Error("smoke timed out");
+          },
+        },
+      }),
+    ),
+    (error) => error instanceof DeployctlError && /smoke timed out/.test(error.message),
+  );
+
+  const current = await history.readCurrentState(target);
+  assert.equal(current?.currentVersion ?? null, null);
+  assert.equal(current?.inProgress, undefined);
+
+  const events = await history.listEvents(target);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].status, "failure");
+  assert.match(events[0].errorMessage ?? "", /smoke timed out/);
+});
+
 test("deployFrontend rejects a target that already has a deploy in progress", async () => {
   const f = fakes();
   const history = new InMemoryDeployHistoryRepository();

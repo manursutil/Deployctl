@@ -172,7 +172,27 @@ export async function deployFrontend(input: DeployFrontendInput): Promise<Deploy
         : new DeployctlError(`Frontend deploy failed for ${target.env}/${target.tenant}: ${formatError(error)}`);
     }
 
-    const healthy = await input.smokeCheck.check(tenant.frontendUrl);
+    let healthy: boolean;
+    try {
+      healthy = await input.smokeCheck.check(tenant.frontendUrl);
+    } catch (error) {
+      const event = newDeployEvent({
+        target,
+        eventId,
+        requestedRef: resolved.requestedRef,
+        resolvedCommit: resolved.resolvedCommit,
+        actor: input.actor,
+        status: "failure",
+        startedAt,
+        finishedAt: clock(),
+        errorMessage: formatError(error),
+      });
+      await input.history.appendEvent(event);
+      throw error instanceof DeployctlError
+        ? error
+        : new DeployctlError(`Frontend smoke check failed for ${target.env}/${target.tenant}: ${formatError(error)}`);
+    }
+
     const status: DeployEventStatus = healthy ? "success" : "failure";
     const event = newDeployEvent({
       target,
