@@ -74,6 +74,34 @@ test("startDeploymentGuardrail rejects a target that already has a deploy in pro
       }),
     (error) => error instanceof DeployctlError && /deploy already in progress/.test(error.message),
   );
+
+  assert.equal((await repository.readCurrentState(target))?.inProgress?.eventId, "dep_20260628_110000");
+});
+
+test("repository tryStartDeployment initializes and rejects using the same guardrail semantics", async () => {
+  const repository = new InMemoryDeployHistoryRepository();
+
+  const current = await repository.tryStartDeployment(target, {
+    eventId: "dep_20260628_110000",
+    since: "2026-06-28T11:00:00Z",
+    actor: "manual",
+  });
+
+  assert.equal(current.currentVersion, null);
+  assert.equal(current.lastSuccessfulEventId, null);
+  assert.equal(current.inProgress?.eventId, "dep_20260628_110000");
+
+  await assert.rejects(
+    () =>
+      repository.tryStartDeployment(target, {
+        eventId: "dep_20260628_120000",
+        since: "2026-06-28T12:00:00Z",
+        actor: "manual",
+      }),
+    (error) => error instanceof DeployctlError && /deploy already in progress/.test(error.message),
+  );
+
+  assert.equal((await repository.readCurrentState(target))?.inProgress?.eventId, "dep_20260628_110000");
 });
 
 test("clearDeploymentGuardrail removes only the matching in-progress event", async () => {
