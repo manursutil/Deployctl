@@ -11,7 +11,7 @@ Planned against commit `a001b1b` on `main`.
 | [001](001-record-frontend-smoke-check-exceptions.md) | Record frontend smoke-check exceptions as deploy failure events | P1 | S | — | TODO |
 | [002](002-make-deployment-guardrail-atomic.md) | Make deployment guardrail acquisition atomic | P1 | M | — | DONE |
 | [003](003-verify-direct-commit-shas.md) | Verify direct commit SHA refs against the configured repository | P2 | S/M | — | TODO |
-| [004](004-enforce-frontend-build-identity-inputs.md) | Enforce configured frontend build identity inputs | P2 | S | — | TODO |
+| [004](004-enforce-frontend-build-identity-inputs.md) | Enforce configured frontend build identity inputs | P2 | S | — | DONE |
 | [005](005-add-git-adapter-tests.md) | Add focused tests for the Git CLI adapter boundary | P3 | S | 003 if executed first | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale — finding fixed independently or approach abandoned)

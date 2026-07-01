@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   deployFrontend,
   frontendArtifactKey,
+  frontendIdentityBuildVariables,
   frontendArtifactStorageKey,
   type FrontendArtifact,
   type FrontendArtifactStore,
@@ -59,14 +60,17 @@ type Fakes = {
   sync: FrontendSync;
   smokeCheck: FrontendSmokeCheck;
   built: string[];
+  buildRequests: { key: ReturnType<typeof frontendArtifactKey>; buildVariables: Record<string, string> }[];
   synced: { bucket: string; storageKey: string }[];
 };
 
 function fakes(options: { exists?: boolean; smokeOk?: boolean } = {}): Fakes {
   const built: string[] = [];
+  const buildRequests: { key: ReturnType<typeof frontendArtifactKey>; buildVariables: Record<string, string> }[] = [];
   const synced: { bucket: string; storageKey: string }[] = [];
   return {
     built,
+    buildRequests,
     synced,
     store: {
       async exists() {
@@ -78,6 +82,7 @@ function fakes(options: { exists?: boolean; smokeOk?: boolean } = {}): Fakes {
       async build(request): Promise<FrontendArtifact> {
         const storageKey = frontendArtifactStorageKey(config.frontendArtifacts.prefix, request.key);
         built.push(storageKey);
+        buildRequests.push({ key: request.key, buildVariables: request.buildVariables });
         return { storageKey, byteSize: 1 };
       },
     },
@@ -137,6 +142,45 @@ test("deployFrontend reuses an existing artifact instead of rebuilding", async (
   assert.equal(result.reused, true);
   assert.equal(f.built.length, 0);
   assert.equal(f.synced.length, 1);
+});
+
+test("deployFrontend rejects missing configured frontend build identity inputs", async () => {
+  const f = fakes();
+  const strictConfig: DeployctlConfig = {
+    ...config,
+    build: {
+      ...config.build,
+      frontend: {
+        ...config.build.frontend,
+        buildConfigIdentityInputs: ["VITE_TENANT", "VITE_ENVIRONMENT"],
+      },
+    },
+  };
+
+  await assert.rejects(
+    deployFrontend(
+      baseInput(f, {
+        config: strictConfig,
+        buildVariables: { VITE_TENANT: "client1" },
+      }),
+    ),
+    (error) => error instanceof DeployctlError && /VITE_ENVIRONMENT/.test(error.message),
+  );
+
+  assert.equal(f.built.length, 0);
+  assert.equal(f.synced.length, 0);
+});
+
+test("deployFrontend ignores non-identity build variables for artifact identity but passes them to the builder", async () => {
+  const base = fakes({ exists: false });
+  await deployFrontend(baseInput(base, { buildVariables: { VITE_TENANT: "client1", IGNORED: "first" } }));
+
+  const withExtra = fakes({ exists: false });
+  await deployFrontend(baseInput(withExtra, { buildVariables: { VITE_TENANT: "client1", IGNORED: "second" } }));
+
+  assert.equal(base.buildRequests[0].key.fingerprint, withExtra.buildRequests[0].key.fingerprint);
+  assert.deepEqual(base.buildRequests[0].buildVariables, { VITE_TENANT: "client1", IGNORED: "first" });
+  assert.deepEqual(withExtra.buildRequests[0].buildVariables, { VITE_TENANT: "client1", IGNORED: "second" });
 });
 
 test("deployFrontend reports failure and clears the guardrail when the smoke check fails", async () => {
@@ -211,6 +255,16 @@ test("frontendArtifactKey changes when any build variable value differs", () => 
   const otherTenant = frontendArtifactKey({ env: "staging", tenant: "client2", resolvedCommit: commit, buildVariables: { VITE_TENANT: "client2", VITE_ENVIRONMENT: "staging" } });
 
   assert.notEqual(base.fingerprint, otherTenant.fingerprint);
+});
+
+test("frontendIdentityBuildVariables returns only configured identity inputs", () => {
+  assert.deepEqual(
+    frontendIdentityBuildVariables(
+      { VITE_TENANT: "client1", VITE_ENVIRONMENT: "staging", EXTRA: "ignored" },
+      ["VITE_TENANT", "VITE_ENVIRONMENT"],
+    ),
+    { VITE_TENANT: "client1", VITE_ENVIRONMENT: "staging" },
+  );
 });
 
 test("frontendArtifactStorageKey embeds commit, env, tenant and fingerprint under the prefix", () => {
