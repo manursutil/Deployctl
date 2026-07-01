@@ -46,6 +46,25 @@ export function frontendArtifactKey(input: {
   return { env: input.env, tenant: input.tenant, resolvedCommit: input.resolvedCommit, fingerprint };
 }
 
+export function frontendIdentityBuildVariables(
+  buildVariables: Record<string, string>,
+  identityInputs: string[],
+): Record<string, string> {
+  const identityBuildVariables: Record<string, string> = {};
+
+  for (const name of identityInputs) {
+    const value = buildVariables[name];
+
+    if (value === undefined || value.length === 0) {
+      throw new DeployctlError(`Missing frontend build identity input: ${name}`);
+    }
+
+    identityBuildVariables[name] = value;
+  }
+
+  return identityBuildVariables;
+}
+
 export function frontendArtifactStorageKey(prefix: string, key: FrontendArtifactKey): string {
   return `${prefix}/${key.resolvedCommit}/${key.env}/${key.tenant}-${key.fingerprint}.tar.gz`;
 }
@@ -124,11 +143,16 @@ export async function deployFrontend(input: DeployFrontendInput): Promise<Deploy
     resolver: input.refResolver,
   });
 
+  const identityBuildVariables = frontendIdentityBuildVariables(
+    input.buildVariables,
+    input.config.build.frontend.buildConfigIdentityInputs,
+  );
+
   const key = frontendArtifactKey({
     env: input.env,
     tenant: input.tenant,
     resolvedCommit: resolved.resolvedCommit,
-    buildVariables: input.buildVariables,
+    buildVariables: identityBuildVariables,
   });
   const storageKey = frontendArtifactStorageKey(input.config.frontendArtifacts.prefix, key);
 
