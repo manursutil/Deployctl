@@ -235,8 +235,8 @@ Suggested future module seams, once code exists:
 - Backend SSM deployment orchestration.
 - Frontend artifact and S3 sync orchestration.
 - Status and logs queries: status is implemented in `src/core/diagnostics.ts`; logs and the S3 history adapter are still pending.
-- Rollback orchestration: implemented in `src/core/rollback.ts`; CLI controllers and AWS adapters still pending.
-- Cleanup and retention: decision logic implemented in `src/core/cleanup.ts`; CLI controllers and the S3 deletion adapter still pending.
+- Rollback orchestration: implemented in `src/core/rollback.ts`; `deployctl rollback backend|frontend` CLI controllers validate offline and report the pending boundary; AWS adapters still pending.
+- Cleanup and retention: decision logic implemented in `src/core/cleanup.ts`; `deployctl cleanup releases|artifacts` CLI controllers validate offline and report the pending boundary; the S3 history adapter and deletion executor still pending.
 
 These modules must stay directly importable/callable independent of `process.argv` and stdout, since the planned web dashboard (Phase 15) will call them in-process rather than through the CLI binary.
 
@@ -296,9 +296,13 @@ node --import tsx src/cli.ts config check
 node --import tsx src/cli.ts tenants list --env staging
 node --import tsx src/cli.ts deploy backend --tenant client1 --env staging --ref main
 node --import tsx src/cli.ts deploy frontend --tenant client1 --env staging --ref main
+node --import tsx src/cli.ts rollback backend --tenant client1 --env staging --version <commit>
+node --import tsx src/cli.ts rollback frontend --tenant client1 --env staging
+node --import tsx src/cli.ts cleanup releases --env staging --dry-run
+node --import tsx src/cli.ts cleanup artifacts --env staging --dry-run
 ```
 
-The `deploy backend` and `deploy frontend` commands currently validate inputs offline (tenant/env existence, and for backend a configured SSM target selector) and then fail clearly that AWS execution is still pending; they make no AWS or network calls until the SSM/S3/build adapters land.
+The `deploy`, `rollback`, and `cleanup` commands currently validate inputs offline and then fail clearly that the work is still pending; they make no AWS or network calls until the SSM/S3/build adapters land. Deploy/rollback validate tenant/env existence (and, for backend, a configured SSM target selector); `rollback --version` is optional (omit to target the previous version); cleanup validates the environment against the tenant registry and defaults to dry-run.
 
 Proposed operator commands from the architecture:
 

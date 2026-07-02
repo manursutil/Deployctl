@@ -324,10 +324,10 @@ Progress:
 - Added `artifactStorageKey` to the deploy/rollback event schema (`src/core/history.ts`) and set it on `deployFrontend` events so frontend rollback can redeploy the exact artifact.
 - Added the `newRollbackEvent` builder, `formatRollbackEventId` (`rbk_YYYYMMDD_HHMMSS`), and the shared `eventVersion(...)` helper to `src/core/history.ts`.
 - Tests cover default and explicit version selection, the empty/no-earlier-version/unknown-version error cases, backend rollback success/executor-throw/partial_failure/guardrail-conflict, and frontend rollback artifact re-sync/missing-artifact/smoke-check-failure (AWS work mocked behind the seams).
+- Added the `deployctl rollback backend|frontend --tenant <t> --env <e> [--version <v>]` CLI controllers, mirroring the deploy controllers: validate tenant/env offline (and, for backend, a configured SSM target selector), then fail clearly that AWS execution is pending. `--version` is optional (omit to roll back to the previous version). No AWS or network calls until the adapters land.
 
 Still pending (needs Phase 0 confirmation + real AWS before it can be verified end to end):
 
-- Add the `deployctl rollback backend|frontend` CLI controllers (offline flag/tenant/env validation, then fail clearly that AWS execution is pending), mirroring the deploy controllers.
 - Wire the real `SsmDeployExecutor`, `FrontendSync`, `FrontendSmokeCheck`, and an S3-backed `DeployHistoryRepository` into the rollback controllers once the deploy adapters land (shared with Phases 6-7).
 - Confirm the server-side backend rollback behavior for a missing/pruned release directory (Phase 0), so a rollback to an old commit re-prepares the release when needed.
 
@@ -390,10 +390,11 @@ Progress:
 - Added `src/core/cleanup.ts` with `planRetention(...)`: pure decision logic that keeps a version if it is current, among the newest `successfulVersionsPerTarget` by last successful deploy, or deployed within `keepDays`; everything else is deletable. Each decision carries its keep reasons.
 - Added `deploymentRetentionCandidates(...)` (derives candidates from a target's history — backend releases keyed by commit, frontend artifacts keyed by recorded `artifactStorageKey`) and `planTargetRetention(...)` (reads history + current state through the repository seam and applies the policy). The plan is the dry-run view; deletion is a separate adapter concern.
 - Tests cover the newest-N rule, the keepDays window, current-version protection, backend/frontend candidate derivation, and the end-to-end target plan (repository mocked in-memory).
+- Added the `deployctl cleanup releases|artifacts --env <e> [--dry-run]` CLI controllers (`releases` → backend, `artifacts` → frontend): validate the environment offline against the tenant registry and load config, then fail clearly that the plan cannot be computed until the S3 history adapter and `CleanupExecutor` land. No AWS or network calls yet.
 
 Still pending (needs Phase 0 confirmation + real AWS before it can be verified end to end):
 
-- Add the `deployctl cleanup releases|artifacts --env <e> [--tenant <t>] --dry-run` CLI controllers over `planTargetRetention`, defaulting to dry-run.
+- Wire `planTargetRetention` into the cleanup controllers so they emit a real dry-run keep/delete plan once the S3-backed `DeployHistoryRepository` adapter lands.
 - Add a `CleanupExecutor` seam and its S3 adapter to delete the `delete` set (old backend release directories and frontend artifact objects); wire it in behind an explicit non-dry-run flag.
 - Wire the S3-backed `DeployHistoryRepository` adapter so cleanup reads real history (shared with Phases 6-7).
 

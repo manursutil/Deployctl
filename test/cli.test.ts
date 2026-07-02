@@ -13,6 +13,8 @@ test("deployctl --help prints usage", () => {
   assert.equal(result.status, 0);
   assert.match(result.stdout, /Usage:/);
   assert.match(result.stdout, /deployctl deploy backend\|frontend/);
+  assert.match(result.stdout, /deployctl rollback backend\|frontend/);
+  assert.match(result.stdout, /deployctl cleanup releases\|artifacts/);
   assert.equal(result.stderr, "");
 });
 
@@ -130,6 +132,83 @@ test("deployctl deploy frontend validates inputs and reports that AWS execution 
   const result = spawnSync(
     process.execPath,
     ["--import", "tsx", "src/cli.ts", "deploy", "frontend", "--tenant", "client1", "--env", "staging", "--ref", "main"],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /not yet executable/);
+});
+
+test("deployctl rollback frontend rejects an unknown tenant before any AWS work", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "src/cli.ts", "rollback", "frontend", "--tenant", "ghost", "--env", "staging"],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Tenant not found in staging: ghost/);
+});
+
+test("deployctl rollback frontend validates inputs and reports that AWS execution is still pending", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "src/cli.ts", "rollback", "frontend", "--tenant", "client1", "--env", "staging"],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /not yet executable/);
+});
+
+test("deployctl cleanup releases rejects an unknown environment before any AWS work", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "src/cli.ts", "cleanup", "releases", "--env", "ghost"],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Environment not found in tenants config: ghost/);
+});
+
+test("deployctl cleanup releases validates inputs and reports that the cleanup adapter is still pending", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "src/cli.ts", "cleanup", "releases", "--env", "staging", "--dry-run"],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /not yet available/);
+});
+
+test("deployctl cleanup artifacts validates inputs and reports that the cleanup adapter is still pending", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "src/cli.ts", "cleanup", "artifacts", "--env", "staging", "--dry-run"],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /not yet available/);
+});
+
+test("deployctl rollback backend rejects an unknown tenant before any AWS work", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "src/cli.ts", "rollback", "backend", "--tenant", "ghost", "--env", "staging"],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Tenant not found in staging: ghost/);
+});
+
+test("deployctl rollback backend validates inputs and reports that AWS execution is still pending", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "src/cli.ts", "rollback", "backend", "--tenant", "client1", "--env", "staging", "--version", "abc123"],
     { encoding: "utf8" },
   );
 
