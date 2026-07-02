@@ -24,6 +24,7 @@ Current files:
 - `CONTEXT.md`: this file, optimized as quick context for coding agents.
 - `docs/initial-architecture-proposal.md`: primary architecture proposal and decisions.
 - `docs/implementation-plan.md`: phased implementation tracker and current phase status.
+- `docs/phase-0-checklist.md`: working checklist of Phase 0 infrastructure confirmations, grouped by the AWS adapter each answer unblocks.
 - `docs/multi-tenant-deployment-explainer.md`: beginner-friendly explanation of the no-Docker deployment model.
 - `package.json`, `package-lock.json`, `tsconfig.json`: TypeScript CLI package scaffold.
 - `deployctl.config.yml`: initial project config with placeholder operational values.
@@ -322,7 +323,7 @@ Repository gaps:
 - No deploy history schemas exist yet.
 - No IAM policies exist yet.
 
-Architecture and implementation open questions:
+Architecture and implementation open questions (tracked as a working checklist in `docs/phase-0-checklist.md`, grouped by the AWS adapter each answer unblocks):
 
 - Confirm existing production ASG bootstrap behavior for replacement instances.
 - Choose exact deploy history S3 bucket or prefix.
