@@ -260,7 +260,7 @@ Completed:
 
 Backend and frontend deploy commands (Phases 6-7) must not ship until the shared foundations of Phases 2-5 are implemented and wired into the deploy flow: tenant registry, ref resolution, deploy history/current-state, and the `inProgress` guardrail. In addition, the deploy flow must fail clearly and leave no partial state on any of: config validation, guardrail conflict, deploy execution, or history update.
 
-Architecture follow-up: Plan 006 (`plans/006-deepen-deploy-lifecycle-module.md`) will deepen the shared guarded deploy lifecycle into `src/core/lifecycle.ts`. The lifecycle module should own operation id generation, guardrail acquisition/cleanup, failure event recording, success event recording, current-state update rules, and error normalization for backend deploy, frontend deploy, rollback, and backend reconcile. Pre-work failures such as ref resolution, rollback target selection, and frontend artifact identity validation remain outside deploy history for now. Public behavior, event shapes, event ids, and error messages should be preserved.
+Architecture follow-up completed: Plan 006 (`plans/006-deepen-deploy-lifecycle-module.md`) added `src/core/lifecycle.ts` with `runDeployLifecycle(...)`. The lifecycle module owns operation id generation, guardrail acquisition/cleanup, optional failure/success event recording, success-only current-state update rules, and error normalization for backend deploy, frontend deploy, rollback, and backend reconcile. Pre-work failures such as ref resolution, rollback target selection, and frontend artifact identity validation remain outside deploy history.
 
 ## Phase 6: Backend Deploy
 
@@ -271,8 +271,7 @@ Goal: deploy backend releases through AWS SSM to staging EC2 or production ASG i
 Progress:
 
 - Added per-environment SSM target selection to `deployctl.config.yml` (`ssmTargets`, discriminated by `mode`: `instanceIds` | `asg`) with strict validation in `src/core/config.ts`.
-- Added `src/core/deploy.ts` with `deployBackend(input)`: a deep orchestration module that validates the tenant, resolves the ref to an immutable commit, takes/clears the `inProgress` guardrail, runs the deploy through the `SsmDeployExecutor` seam, and records an append-only event plus current-state update. A failure (executor throw or all-instance failure) records a failure event and always clears the guardrail, leaving no partial state.
-- Planned refactor (Plan 006): move the repeated guardrail/event/current-state lifecycle from `deployBackend(input)` into `src/core/lifecycle.ts` while keeping tenant lookup, ref resolution, SSM target selection, and executor work in the backend deploy module.
+- Added `src/core/deploy.ts` with `deployBackend(input)`: a deep orchestration module that validates the tenant, resolves the ref to an immutable commit, selects the SSM target, then runs guarded executor work through `runDeployLifecycle(...)`. The lifecycle records append-only events, updates current state only on success, normalizes executor errors, and always clears the `inProgress` guardrail.
 - Added `getTenantConfig(registry, env, tenant)` to `src/core/tenants.ts` for single-tenant lookup.
 - Tests cover success, guardrail conflict, executor-throw failure, and partial_failure status (AWS work mocked behind the executor seam).
 
@@ -303,8 +302,7 @@ Decision (artifact identity): the artifact fingerprint is a hash over the resolv
 Progress:
 
 - Added `src/core/frontend.ts` with `frontendArtifactKey` / `frontendArtifactStorageKey` (artifact identity + S3 key layout `frontend/<commit>/<env>/<tenant>-<fingerprint>.tar.gz`).
-- Added `deployFrontend(input)`: a deep orchestration module over `FrontendArtifactStore`, `FrontendBuilder`, `FrontendSync`, and `FrontendSmokeCheck` seams. It resolves the ref, computes the artifact identity, reuses or builds the artifact, syncs to the tenant bucket, smoke checks, and records an append-only event plus current state, always clearing the `inProgress` guardrail.
-- Planned refactor (Plan 006): move the repeated guardrail/event/current-state lifecycle from `deployFrontend(input)` into `src/core/lifecycle.ts` while keeping ref resolution, artifact identity, build/reuse/sync, and smoke-check behavior in the frontend deploy module.
+- Added `deployFrontend(input)`: a deep orchestration module over `FrontendArtifactStore`, `FrontendBuilder`, `FrontendSync`, and `FrontendSmokeCheck` seams. It resolves the ref, computes the artifact identity, then runs build/reuse/sync/smoke-check work through `runDeployLifecycle(...)`, which records append-only events plus current state and always clears the `inProgress` guardrail.
 - Added the `deployctl deploy frontend` CLI controller (validates flags + tenant/env offline, then fails clearly that AWS execution is pending).
 - Tests cover deterministic/sensitive artifact identity, build-vs-reuse, smoke-check failure, guardrail conflict, and CLI input validation (AWS work mocked behind the seams).
 
@@ -328,8 +326,7 @@ Decision (frontend): frontend rollback redeploys the exact recorded artifact rat
 
 Progress:
 
-- Added `src/core/rollback.ts` with `selectRollbackTarget(...)`, `rollbackBackend(...)`, and `rollbackFrontend(...)` — deep orchestration modules over the same history repository, guardrail, `SsmDeployExecutor`, and `FrontendSync`/`FrontendSmokeCheck` seams used by deploy. Each takes/clears the `inProgress` guardrail, records an append-only rollback event, and updates current state only on success; a failure records a failure event and always clears the guardrail.
-- Planned refactor (Plan 006): move the repeated guardrail/event/current-state lifecycle from rollback orchestration into `src/core/lifecycle.ts` while keeping version selection and backend/frontend rollback work in `src/core/rollback.ts`.
+- Added `src/core/rollback.ts` with `selectRollbackTarget(...)`, `rollbackBackend(...)`, and `rollbackFrontend(...)` — deep orchestration modules over the same history repository, `SsmDeployExecutor`, and `FrontendSync`/`FrontendSmokeCheck` seams used by deploy. Version selection and artifact validation stay in rollback; guarded redeploy/re-sync work, event recording, current-state updates, error normalization, and guardrail cleanup run through `runDeployLifecycle(...)`.
 - Added `artifactStorageKey` to the deploy/rollback event schema (`src/core/history.ts`) and set it on `deployFrontend` events so frontend rollback can redeploy the exact artifact.
 - Added the `newRollbackEvent` builder, `formatRollbackEventId` (`rbk_YYYYMMDD_HHMMSS`), and the shared `eventVersion(...)` helper to `src/core/history.ts`.
 - Tests cover default and explicit version selection, the empty/no-earlier-version/unknown-version error cases, backend rollback success/executor-throw/partial_failure/guardrail-conflict, and frontend rollback artifact re-sync/missing-artifact/smoke-check-failure (AWS work mocked behind the seams).
@@ -384,7 +381,7 @@ Tasks:
 
 Simulation progress (does not unblock the real phase): `src/core/reconcile.ts` (`reconcileBackend`) and the `deployctl reconcile backend --tenant <t> --env <e>` controller exist and are demonstrated end to end in the Docker lab (Sim Phase 5): it reads the current version from `current.json` and re-prepares that release on every configured instance via the same `SsmDeployExecutor` seam. What remains blocked is the real-AWS side — resolving healthy ASG instances at runtime and confirming actual bootstrap behavior — which needs Phase 0 answers. The sim `reconcile` operates per `<env>/<tenant>`; the real command may operate env-wide.
 
-Planned refactor (Plan 006): `reconcileBackend` should use `src/core/lifecycle.ts` for the same guarded lifecycle as deploy and rollback, but with history/current-state recording disabled because reconcile does not establish a new desired version.
+Lifecycle convention: `reconcileBackend` uses `runDeployLifecycle(...)` for the same guardrail acquisition/cleanup and error normalization as deploy and rollback, but omits lifecycle history/current-state recording because reconcile does not establish a new desired version.
 
 ## Phase 11: Cleanup And Retention
 

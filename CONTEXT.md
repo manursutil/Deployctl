@@ -35,6 +35,7 @@ Current files:
 - `src/core/tenants.ts`: `tenants.yml` loader, strict validator, secret-value guard, and tenant listing.
 - `src/core/refs.ts`: deployment ref resolution policy that returns immutable commit metadata.
 - `src/core/history.ts`: deploy/rollback event schemas (including the frontend `artifactStorageKey`), current-state schema, repository seam, in-memory repository, event/rollback builders, and previous-version lookup.
+- `src/core/lifecycle.ts`: shared guarded deploy lifecycle (`runDeployLifecycle`) for backend deploy, frontend deploy, rollback, and backend reconcile; owns operation id generation, `inProgress` acquisition/cleanup, optional success/failure event recording, success-only current-state updates, and error normalization while leaving path-specific pre-work in each caller.
 - `src/core/deploy.ts`: backend deploy orchestration (`deployBackend`) over the `SsmDeployExecutor` seam; wires tenant lookup, ref resolution, the `inProgress` guardrail, and deploy history.
 - `src/core/frontend.ts`: frontend artifact identity (`frontendArtifactKey`/`frontendArtifactStorageKey`) and deploy orchestration (`deployFrontend`) over the `FrontendArtifactStore`, `FrontendBuilder`, `FrontendSync`, and `FrontendSmokeCheck` seams.
 - `src/core/rollback.ts`: backend/frontend rollback orchestration (`rollbackBackend`/`rollbackFrontend`) and version selection (`selectRollbackTarget`) over the same history, guardrail, SSM executor, and frontend sync/smoke-check seams.
@@ -215,7 +216,7 @@ Implemented patterns:
 - Tenant registry callers should use `loadTenantRegistry(path)` and `listTenants(registry, environment)` from `src/core/tenants.ts` rather than parsing YAML in command code.
 - Ref resolution callers should use `resolveDeploymentRef(input)` from `src/core/refs.ts`. Core enforces environment ref policy and returns both `requestedRef` and immutable `resolvedCommit`; Git access stays behind the `RefResolver` adapter interface. `GitCliRefResolver` accepts a full commit SHA only when the configured repository advertises it (`git ls-remote`), and runs Git through an injectable `GitCommandRunner` seam so the adapter is tested offline (`test/git.test.ts`).
 - History callers should use the `DeployHistoryRepository` seam from `src/core/history.ts`. Append-only events and mutable current state are separate operations; successful deploy/rollback events update current state through `applySuccessfulEventToCurrentState(...)`.
-- Deploy and rollback orchestration must call `startDeploymentGuardrail(...)` before work starts and `clearDeploymentGuardrail(...)` on completion or failure. The guardrail lives in `CurrentState.inProgress`, scoped per `env/tenant/app`.
+- Deploy, rollback, and reconcile guarded work must use `runDeployLifecycle(...)` from `src/core/lifecycle.ts`; it calls `startDeploymentGuardrail(...)` before work starts and `clearDeploymentGuardrail(...)` on completion or failure. The lower-level guardrail seam stays in `src/core/guardrail.ts`, backed by `CurrentState.inProgress` per `env/tenant/app`.
 - Backend deploy callers should use `deployBackend(input)` from `src/core/deploy.ts`. It accepts its dependencies (config, registry, ref resolver, history repository, and an `SsmDeployExecutor`) rather than creating them, so the CLI and the future dashboard call the same module and tests mock the AWS work behind the executor seam. All real SSM/secret work lives behind `SsmDeployExecutor`; orchestration only passes resolved facts and resource references — never secret values.
 - SSM Run Command targets are selected per environment via `deployctl.config.yml` `ssmTargets`, a discriminated selector (`mode: instanceIds` with `instanceIds`, or `mode: asg` with `autoScalingGroupName`). Identifiers are placeholders until Phase 0 confirms them; the selector shape is fixed in code.
 - Frontend deploy callers should use `deployFrontend(input)` from `src/core/frontend.ts`, with the same dependency-injection shape (config, registry, ref resolver, history, plus the artifact-store/builder/sync/smoke-check seams). The v1 artifact identity is `frontendArtifactKey`: a fingerprint over the resolved commit and the exact env/tenant/build-variable values, so one tenant's build is never reused for another. Build-variable values are passed in as input; their source is a Phase 0 confirmation kept out of the core. The synced artifact's S3 key is recorded on the deploy event as `artifactStorageKey` so rollback can redeploy the exact artifact.
@@ -243,7 +244,7 @@ Suggested future module seams, once code exists:
 - CLI command parsing.
 - Tenant config loading and validation: implemented in `src/core/tenants.ts`.
 - Git/Bitbucket ref resolution: implemented in `src/core/refs.ts` with Git access isolated in `src/adapters/git.ts`.
-- Concurrency guardrail (`inProgress`/`since` on `current.json`): implemented in `src/core/guardrail.ts`.
+- Concurrency guardrail (`inProgress`/`since` on `current.json`): implemented in `src/core/guardrail.ts`; deploy lifecycle orchestration uses it through `src/core/lifecycle.ts`.
 - Deploy history/current-state repository: core schemas and repository seam are implemented in `src/core/history.ts`; S3 persistence adapter is still pending.
 - Backend SSM deployment orchestration.
 - Frontend artifact and S3 sync orchestration.
@@ -268,6 +269,7 @@ Current paths:
 - `src/core/tenants.ts`: tenant registry loading, validation, likely-secret rejection, and tenant listing.
 - `src/core/refs.ts`: environment-aware ref resolution into immutable commit metadata.
 - `src/core/history.ts`: deploy history event validation, current-state validation, repository seam, and in-memory repository.
+- `src/core/lifecycle.ts`: `runDeployLifecycle(...)`, the deploy-specific lifecycle module shared by backend deploy, frontend deploy, rollback, and backend reconcile.
 - `src/adapters/git.ts`: Git CLI ref resolver adapter.
 - `src/adapters/filesystem-history.ts`: filesystem-backed `DeployHistoryRepository` adapter used when `adapterMode: sim`.
 - `src/adapters/docker-ssm.ts`: `SsmDeployExecutor` adapter used when `adapterMode: sim`; runs `scripts/ec2/deploy-backend.sh` via `docker exec`.
@@ -292,6 +294,7 @@ Current paths:
 - `test/tenants.test.ts`: tenant registry validation behavior tests.
 - `test/refs.test.ts`: ref resolution policy behavior tests.
 - `test/history.test.ts`: deploy history/current-state behavior tests.
+- `test/lifecycle.test.ts`: guarded deploy lifecycle behavior tests (guardrail ordering/cleanup, success/failure event recording, current-state update rules, and no-record reconcile-style work).
 - `test/rollback.test.ts`: rollback version-selection and backend/frontend rollback behavior tests.
 - `test/diagnostics.test.ts`: status query and rendering behavior tests.
 - `test/cleanup.test.ts`: retention decision, candidate derivation, and per-target plan behavior tests.
