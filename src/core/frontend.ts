@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { DeployctlError, formatError } from "../shared.js";
 import type { DeployctlConfig } from "./config.js";
 import {
-  applySuccessfulEventToCurrentState,
   formatDeployEventId,
   newDeployEvent,
   type DeployEvent,
@@ -10,7 +9,7 @@ import {
   type DeployHistoryRepository,
   type DeployTarget,
 } from "./history.js";
-import { clearDeploymentGuardrail, startDeploymentGuardrail } from "./guardrail.js";
+import { runDeployLifecycle } from "./lifecycle.js";
 import { resolveDeploymentRef, type RefResolver } from "./refs.js";
 import { getTenantConfig, type TenantRegistry } from "./tenants.js";
 
@@ -156,15 +155,18 @@ export async function deployFrontend(input: DeployFrontendInput): Promise<Deploy
   });
   const storageKey = frontendArtifactStorageKey(input.config.frontendArtifacts.prefix, key);
 
-  const startedAt = clock();
-  const eventId = (input.generateEventId ?? formatDeployEventId)(startedAt);
-
-  await startDeploymentGuardrail(input.history, target, { eventId, since: startedAt.toISOString(), actor: input.actor });
-
   let reused = false;
+  let recordedEvent: DeployEvent | undefined;
+  let failureMessage = (error: unknown) =>
+    `Frontend deploy failed for ${target.env}/${target.tenant}: ${formatError(error)}`;
 
-  try {
-    try {
+  const lifecycle = await runDeployLifecycle({
+    target,
+    actor: input.actor,
+    history: input.history,
+    clock,
+    generateEventId: input.generateEventId ?? formatDeployEventId,
+    work: async () => {
       reused = await input.artifacts.exists(storageKey);
 
       if (!reused) {
@@ -178,69 +180,53 @@ export async function deployFrontend(input: DeployFrontendInput): Promise<Deploy
       }
 
       await input.sync.sync({ bucket: tenant.frontendBucket, storageKey });
-    } catch (error) {
-      const event = newDeployEvent({
-        target,
-        eventId,
-        requestedRef: resolved.requestedRef,
-        resolvedCommit: resolved.resolvedCommit,
-        actor: input.actor,
-        status: "failure",
-        startedAt,
-        finishedAt: clock(),
-        errorMessage: formatError(error),
-        artifactStorageKey: storageKey,
-      });
-      await input.history.appendEvent(event);
-      throw error instanceof DeployctlError
-        ? error
-        : new DeployctlError(`Frontend deploy failed for ${target.env}/${target.tenant}: ${formatError(error)}`);
-    }
 
-    let healthy: boolean;
-    try {
-      healthy = await input.smokeCheck.check(tenant.frontendUrl);
-    } catch (error) {
-      const event = newDeployEvent({
-        target,
-        eventId,
-        requestedRef: resolved.requestedRef,
-        resolvedCommit: resolved.resolvedCommit,
-        actor: input.actor,
-        status: "failure",
-        startedAt,
-        finishedAt: clock(),
-        errorMessage: formatError(error),
-        artifactStorageKey: storageKey,
-      });
-      await input.history.appendEvent(event);
-      throw error instanceof DeployctlError
-        ? error
-        : new DeployctlError(`Frontend smoke check failed for ${target.env}/${target.tenant}: ${formatError(error)}`);
-    }
+      failureMessage = (error: unknown) =>
+        `Frontend smoke check failed for ${target.env}/${target.tenant}: ${formatError(error)}`;
+      const healthy = await input.smokeCheck.check(tenant.frontendUrl);
 
-    const status: DeployEventStatus = healthy ? "success" : "failure";
-    const event = newDeployEvent({
-      target,
-      eventId,
-      requestedRef: resolved.requestedRef,
-      resolvedCommit: resolved.resolvedCommit,
-      actor: input.actor,
-      status,
-      startedAt,
-      finishedAt: clock(),
-      errorMessage: healthy ? undefined : `frontend smoke check failed: ${tenant.frontendUrl}`,
-      artifactStorageKey: storageKey,
-    });
+      return {
+        status: healthy ? ("success" as const) : ("failure" as const),
+        errorMessage: healthy ? undefined : `frontend smoke check failed: ${tenant.frontendUrl}`,
+      };
+    },
+    record: {
+      updateCurrentStateOnSuccess: true,
+      success: (result, context) => {
+        recordedEvent = newDeployEvent({
+          target,
+          eventId: context.eventId,
+          requestedRef: resolved.requestedRef,
+          resolvedCommit: resolved.resolvedCommit,
+          actor: input.actor,
+          status: result.status,
+          startedAt: context.startedAt,
+          finishedAt: context.finishedAt,
+          errorMessage: result.errorMessage,
+          artifactStorageKey: storageKey,
+        });
+        return recordedEvent;
+      },
+      failure: (error, context) =>
+        newDeployEvent({
+          target,
+          eventId: context.eventId,
+          requestedRef: resolved.requestedRef,
+          resolvedCommit: resolved.resolvedCommit,
+          actor: input.actor,
+          status: "failure",
+          startedAt: context.startedAt,
+          finishedAt: context.finishedAt,
+          errorMessage: formatError(error),
+          artifactStorageKey: storageKey,
+        }),
+    },
+    errorMessage: failureMessage,
+  });
 
-    await input.history.appendEvent(event);
-
-    if (status === "success") {
-      await input.history.updateCurrentState(applySuccessfulEventToCurrentState(event));
-    }
-
-    return { status, reused, event };
-  } finally {
-    await clearDeploymentGuardrail(input.history, target, eventId);
+  if (recordedEvent === undefined) {
+    throw new DeployctlError(`Frontend deploy failed for ${target.env}/${target.tenant}: missing history event`);
   }
+
+  return { status: lifecycle.result.status, reused, event: recordedEvent };
 }
