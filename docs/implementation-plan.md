@@ -86,6 +86,8 @@ Status: `Not started`
 
 Goal: confirm infrastructure assumptions before concrete AWS-facing implementation.
 
+Work this phase from `docs/phase-0-checklist.md`, which restates the tasks below as concrete questions grouped by the AWS adapter each answer unblocks. Every orchestration module is already implemented behind a seam, so Phase 0 is the remaining gate for AWS-facing execution.
+
 Record each confirmed answer in `CONTEXT.md` (and update the relevant section of `docs/initial-architecture-proposal.md` when an answer changes a documented assumption). A task is not "confirmed" until its answer is written down there.
 
 Tasks:
@@ -423,6 +425,7 @@ Current docs:
 - `docs/implementation-plan.md`
 - `docs/implementation-plan-detailed.md`
 - `docs/presentation-qa.md`
+- `docs/phase-0-checklist.md`
 - `CONTEXT.md`
 
 Completed:
