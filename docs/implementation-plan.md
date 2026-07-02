@@ -203,8 +203,9 @@ Tasks:
 Completed:
 
 - Added `src/core/refs.ts` with `resolveDeploymentRef(input)`, returning `requestedRef`, immutable `resolvedCommit`, and `refKind`.
-- Added `src/adapters/git.ts` with `GitCliRefResolver`, a thin Git CLI adapter around `git ls-remote`.
+- Added `src/adapters/git.ts` with `GitCliRefResolver`, a Git CLI adapter around `git ls-remote`. A full commit SHA is accepted only when the configured repository advertises it (via `git ls-remote`), so a typo or foreign SHA fails at resolution rather than later. Git invocation sits behind an injectable `GitCommandRunner` seam so the adapter is tested offline.
 - Added tests for staging branch refs, production branch rejection, immutable production refs, and full commit SHA validation.
+- Added `test/git.test.ts` covering the `GitCliRefResolver` adapter directly with a fake runner: full-SHA verification (advertised/unadvertised), ls-remote command args, tag-over-branch and branch-only selection, no-match rejection, malformed-output rejection, and command-error wrapping.
 
 ## Phase 4: Deploy History And Current State
 
