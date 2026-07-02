@@ -189,6 +189,7 @@ export async function deployFrontend(input: DeployFrontendInput): Promise<Deploy
         startedAt,
         finishedAt: clock(),
         errorMessage: formatError(error),
+        artifactStorageKey: storageKey,
       });
       await input.history.appendEvent(event);
       throw error instanceof DeployctlError
@@ -210,6 +211,7 @@ export async function deployFrontend(input: DeployFrontendInput): Promise<Deploy
         startedAt,
         finishedAt: clock(),
         errorMessage: formatError(error),
+        artifactStorageKey: storageKey,
       });
       await input.history.appendEvent(event);
       throw error instanceof DeployctlError
@@ -228,6 +230,7 @@ export async function deployFrontend(input: DeployFrontendInput): Promise<Deploy
       startedAt,
       finishedAt: clock(),
       errorMessage: healthy ? undefined : `frontend smoke check failed: ${tenant.frontendUrl}`,
+      artifactStorageKey: storageKey,
     });
 
     await input.history.appendEvent(event);

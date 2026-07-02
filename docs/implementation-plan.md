@@ -303,17 +303,28 @@ Still pending (needs Phase 0 confirmation + real AWS before it can be verified e
 
 ## Phase 8: Rollback
 
-Status: `Not started`
+Status: `In progress`
 
 Goal: rollback backend or frontend for one tenant to a previous known version.
 
-Tasks:
+Decision (version selection): a rollback never resolves a git ref. It restores a version drawn from recorded history — by default the successful version immediately before the current one, or an explicit `toVersion` that must match an earlier successful deploy. Both `targetVersion` and `previousVersion` on the rollback event are immutable commit SHAs.
 
-- Implement backend rollback to older release directory.
-- Prepare missing backend release when needed.
-- Implement frontend rollback by redeploying old artifact.
-- Record rollback events.
-- Update current state after successful rollback.
+Decision (backend): backend rollback reuses the same `SsmDeployExecutor.runBackendDeploy` seam as a deploy, passing the target commit. The server-side script prepares the release from a commit whether it is a deploy or a rollback ("prepare missing backend release when needed" is a server-side concern), so no separate executor method is introduced; only the recorded event type differs.
+
+Decision (frontend): frontend rollback redeploys the exact recorded artifact rather than rebuilding. Because the v1 artifact fingerprint depends on build-variable values (which a rollback does not have), the artifact's S3 key is recorded on the frontend deploy event (`artifactStorageKey`); rollback reads it from the target version's successful event and re-syncs it. This removes any ambiguity between identity-sensitive builds.
+
+Progress:
+
+- Added `src/core/rollback.ts` with `selectRollbackTarget(...)`, `rollbackBackend(...)`, and `rollbackFrontend(...)` — deep orchestration modules over the same history repository, guardrail, `SsmDeployExecutor`, and `FrontendSync`/`FrontendSmokeCheck` seams used by deploy. Each takes/clears the `inProgress` guardrail, records an append-only rollback event, and updates current state only on success; a failure records a failure event and always clears the guardrail.
+- Added `artifactStorageKey` to the deploy/rollback event schema (`src/core/history.ts`) and set it on `deployFrontend` events so frontend rollback can redeploy the exact artifact.
+- Added the `newRollbackEvent` builder, `formatRollbackEventId` (`rbk_YYYYMMDD_HHMMSS`), and the shared `eventVersion(...)` helper to `src/core/history.ts`.
+- Tests cover default and explicit version selection, the empty/no-earlier-version/unknown-version error cases, backend rollback success/executor-throw/partial_failure/guardrail-conflict, and frontend rollback artifact re-sync/missing-artifact/smoke-check-failure (AWS work mocked behind the seams).
+
+Still pending (needs Phase 0 confirmation + real AWS before it can be verified end to end):
+
+- Add the `deployctl rollback backend|frontend` CLI controllers (offline flag/tenant/env validation, then fail clearly that AWS execution is pending), mirroring the deploy controllers.
+- Wire the real `SsmDeployExecutor`, `FrontendSync`, `FrontendSmokeCheck`, and an S3-backed `DeployHistoryRepository` into the rollback controllers once the deploy adapters land (shared with Phases 6-7).
+- Confirm the server-side backend rollback behavior for a missing/pruned release directory (Phase 0), so a rollback to an old commit re-prepares the release when needed.
 
 ## Phase 9: Logs And Diagnostics
 
