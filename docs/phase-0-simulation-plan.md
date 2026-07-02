@@ -59,7 +59,18 @@ Recommended first pass:
 
 ## Adapter Strategy
 
-The core modules already depend on seams. The simulation should implement local adapters behind those seams, then wire them through a demo command path or config profile.
+The core modules already depend on seams. The simulation should implement local adapters behind those seams, then wire them through the CLI controllers.
+
+### Adapter selection (decide before Sim Phase 1)
+
+This is the load-bearing decision for the whole simulation. The current CLI controllers do not inject adapters — they validate offline and then unconditionally throw a "pending" error (`runDeployBackend`, `runDeployFrontend`, `runStatus` in `src/cli.ts`). The simulation is not "wire adapters behind existing seams"; it is "give the controllers a way to select an adapter set, then replace the hardcoded throw with real execution when the simulation set is selected."
+
+Decision: add an explicit `adapterMode: aws | sim` field to `deployctl.config.yml` (default `aws`). `deployctl.sim.config.yml` sets `adapterMode: sim`. The controller reads the mode and constructs either the pending-throw path (`aws`, until real adapters land) or the filesystem/Docker simulation adapters (`sim`).
+
+Constraints:
+
+- Production must keep defaulting to the pending-throw. Simulation adapters must never be reachable without `adapterMode: sim`, so a real deploy cannot accidentally run against local filesystem state.
+- Adapter construction stays in the controller (or a small factory it calls); `core/` orchestration modules keep receiving seams as arguments and must not learn about the mode.
 
 | Real adapter | Simulation adapter | Purpose |
 | --- | --- | --- |
@@ -198,6 +209,8 @@ Demo acceptance:
 
 ## Demo Flow
 
+This is the **post–Sim Phase 4 end state**, not a flow that runs today. It exercises commands that are not yet wired (`rollback`, `logs`) and controllers that currently throw a pending error (`deploy`, `status`); each becomes runnable only as its Sim Phase lands. See the per-phase demo acceptance for what is runnable at each step.
+
 The target demo should fit in one terminal session:
 
 ```bash
@@ -218,28 +231,36 @@ The exact flags may change as the CLI controllers are wired, but the demo must u
 
 ### Sim Phase 1: Local Persistence
 
-- Add filesystem-backed history repository.
-- Wire `status` to read simulated current state when using `deployctl.sim.config.yml`.
+- Add the `adapterMode: aws | sim` config field and `deployctl.sim.config.yml` (see "Adapter selection").
+- Add `.deployctl-sim/` to `.gitignore` (it is not currently ignored).
+- Add filesystem-backed history repository behind the `DeployHistoryRepository` seam.
+- Wire `status` to read simulated current state when `adapterMode: sim`.
 - Add tests for append-only events, current state, and guardrail behavior through the adapter.
+
+Note: no deploy command populates state until Sim Phase 2/3, so `status` here is demonstrated against hand-seeded `current.json` records (also used to demo the `inProgress` guardrail conflict).
 
 ### Sim Phase 2: Backend Container
 
 - Add Docker Compose app-server.
 - Add EC2-local backend deploy script.
 - Add simulated SSM executor that runs the script in the container.
-- Wire backend deploy/rollback CLI to the simulated executor.
+- Keep `scripts/ec2/deploy-backend.sh` path-parameterized: read the release root, tenant base dir, and OS user from config/env rather than hardcoding `/opt/sherwood/...`, so real cutover is a value change, not a rewrite (non-goal: simulated paths must not become production defaults).
+- Wire the backend deploy CLI controller to the simulated executor (replaces the current pending-throw when `adapterMode: sim`).
 
 ### Sim Phase 3: Frontend Artifacts
 
-- Add filesystem artifact store and sync adapters.
-- Add fixture frontend build.
-- Wire frontend deploy/rollback CLI to simulated adapters.
+- Add filesystem artifact store and sync adapters behind the frontend seams.
+- Add fixture frontend build behind the `FrontendBuilder` seam.
+- Add the `deployctl rollback backend|frontend` CLI controllers — they do not exist yet (Phase 8 lists them as pending) and are not dispatched in `src/cli.ts`. The `rollback` demo step depends on this.
+- Wire frontend deploy and both rollback controllers to the simulated adapters (replaces the pending-throw when `adapterMode: sim`).
 
 ### Sim Phase 4: Logs And Diagnostics
 
-- Add local logs adapter.
-- Implement `deployctl logs` against the adapter seam.
-- Add API/worker log fixtures in the app-server container.
+Note: this is more than an adapter. `deployctl logs` has no core and no seam yet — `src/core/diagnostics.ts` implements `getTenantStatus` but no logs query, and `logs` is not dispatched in `src/cli.ts` (Phase 9 checkbox unchecked). This phase includes net-new Phase 9 core work.
+
+- Define the CloudWatch logs query seam in `core/` (env/tenant/service/time-range filter) and the `deployctl logs` controller.
+- Add a filesystem logs adapter behind that seam, reading `.deployctl-sim/logs/<env>/<tenant>/<service>.log`.
+- Add API/worker log fixtures written by the app-server container.
 
 ### Sim Phase 5: Production Replacement Demo
 
