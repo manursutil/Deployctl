@@ -231,11 +231,15 @@ The exact flags may change as the CLI controllers are wired, but the demo must u
 
 ### Sim Phase 1: Local Persistence
 
-- Add the `adapterMode: aws | sim` config field and `deployctl.sim.config.yml` (see "Adapter selection").
-- Add `.deployctl-sim/` to `.gitignore` (it is not currently ignored).
-- Add filesystem-backed history repository behind the `DeployHistoryRepository` seam.
-- Wire `status` to read simulated current state when `adapterMode: sim`.
-- Add tests for append-only events, current state, and guardrail behavior through the adapter.
+Status: `Done`
+
+- [x] Add the `adapterMode: aws | sim` config field and `deployctl.sim.config.yml` (see "Adapter selection").
+- [x] Add `.deployctl-sim/` to `.gitignore` (it is not currently ignored).
+- [x] Add filesystem-backed history repository behind the `DeployHistoryRepository` seam.
+- [x] Wire `status` to read simulated current state when `adapterMode: sim`.
+- [x] Add tests for append-only events, current state, and guardrail behavior through the adapter.
+
+Completed: `src/adapters/filesystem-history.ts` (`FileSystemDeployHistoryRepository`) persists events and `current.json` under `.deployctl-sim/history/deploys/<env>/<tenant>/<app>/`, reusing the existing `validateHistoryEvent`/`validateCurrentState` guards. `deployctl status --config deployctl.sim.config.yml` reads through it (`src/cli.ts`); `DEPLOYCTL_SIM_ROOT` overrides the root directory for test isolation. Covered by `test/filesystem-history.test.ts` and the sim-mode cases in `test/cli.test.ts`.
 
 Note: no deploy command populates state until Sim Phase 2/3, so `status` here is demonstrated against hand-seeded `current.json` records (also used to demo the `inProgress` guardrail conflict).
 
