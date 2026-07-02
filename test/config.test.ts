@@ -46,6 +46,9 @@ ssmTargets:
   production:
     mode: asg
     autoScalingGroupName: sherwood-prod-asg
+backendDeploy:
+  releaseRoot: /opt/sherwood/releases
+  osUser: sherwood
 retention:
   successfulVersionsPerTarget: 10
   keepDays: 30
@@ -78,6 +81,7 @@ const baseConfigObject = () => ({
     staging: { mode: "instanceIds", instanceIds: ["i-0abc123staging"] },
     production: { mode: "asg", autoScalingGroupName: "sherwood-prod-asg" },
   },
+  backendDeploy: { releaseRoot: "/opt/sherwood/releases", osUser: "sherwood" },
   retention: { successfulVersionsPerTarget: 10, keepDays: 30 },
 });
 
@@ -133,5 +137,21 @@ test("parseDeployctlConfig rejects an unknown adapterMode", () => {
   assert.throws(
     () => parseDeployctlConfig(value),
     (error) => error instanceof DeployctlError && /adapterMode must be "aws" or "sim"/.test(error.message),
+  );
+});
+
+test("parseDeployctlConfig reads the backendDeploy release root and OS user", () => {
+  const config = parseDeployctlConfig(baseConfigObject());
+
+  assert.deepEqual(config.backendDeploy, { releaseRoot: "/opt/sherwood/releases", osUser: "sherwood" });
+});
+
+test("parseDeployctlConfig rejects a missing backendDeploy section", () => {
+  const value = baseConfigObject() as Record<string, unknown>;
+  delete value.backendDeploy;
+
+  assert.throws(
+    () => parseDeployctlConfig(value),
+    (error) => error instanceof DeployctlError && /backendDeploy must be an object/.test(error.message),
   );
 });

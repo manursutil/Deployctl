@@ -26,6 +26,7 @@ const config: DeployctlConfig = {
   frontendArtifacts: { bucket: "deploy-artifacts", prefix: "frontend" },
   refPolicies: { staging: { allowMovingBranches: true } },
   ssmTargets: { staging: { mode: "instanceIds", instanceIds: ["i-0abc"] } },
+  backendDeploy: { releaseRoot: "/opt/sherwood/releases", osUser: "sherwood" },
   retention: { successfulVersionsPerTarget: 10, keepDays: 30 },
 };
 

@@ -26,6 +26,8 @@ Unblocks: `src/core/deploy.ts` (backend deploy), `src/core/rollback.ts` (backend
 > _Answer:_
 >
 > **Record in:** script, CONTEXT (Domain Model / runtime paths), tenants (`appBaseDir` per tenant)
+>
+> _Simulation answer (not confirmed real infra):_ Sim Phase 2 uses `releaseRoot: /opt/sherwood/releases` and `osUser: sherwood` (`deployctl.config.yml`/`deployctl.sim.config.yml`, `backendDeploy`), matching the assumed layout above, inside the Docker app-server container. This proves the config-driven path shape works; it does not confirm the real EC2 values.
 
 ### A2. PM2 process model
 - [ ] Confirm PM2 process naming for API and worker (current `tenants.yml` assumes `sherwood-api-<tenant>` / `sherwood-worker-<tenant>`).

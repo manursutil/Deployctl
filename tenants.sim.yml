@@ -1,0 +1,14 @@
+# Tenant registry for the Sim Phase 0-2 Docker demo lane
+# (docs/phase-0-simulation-plan.md). Values mirror tenants.yml; the secret
+# names here must match the fixtures baked into
+# docker/sim/app-server/secret-fixtures.json.
+staging:
+  client1:
+    frontendBucket: skincair-staging-frontend-client1
+    dbSecret: skincair/staging/db/client1
+    redisSecret: skincair/staging/redis
+    apiProcess: sherwood-api-client1
+    workerProcess: sherwood-worker-client1
+    appBaseDir: /opt/sherwood/tenants/client1
+    backendHealthUrl: https://client1.sherwood.science/health
+    frontendUrl: https://client1.sherwood.science

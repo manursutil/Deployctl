@@ -42,9 +42,13 @@ Current files:
 - `src/core/cleanup.ts`: retention decision logic (`planRetention`), candidate derivation from history (`deploymentRetentionCandidates`), and the per-target plan (`planTargetRetention`) over the `DeployHistoryRepository` seam; produces a dry-run keep/delete plan with reasons.
 - `src/adapters/git.ts`: Git CLI adapter for resolving refs from the application repository.
 - `src/adapters/filesystem-history.ts`: `FileSystemDeployHistoryRepository`, a filesystem-backed `DeployHistoryRepository` for the Sim Phase 1 simulation lane (docs/phase-0-simulation-plan.md), storing events/current state under `.deployctl-sim/history/deploys/<env>/<tenant>/<app>/`.
+- `src/adapters/docker-ssm.ts`: `DockerSimSsmDeployExecutor`, the Sim Phase 2 `SsmDeployExecutor` that runs `scripts/ec2/deploy-backend.sh` in the Docker app-server container via `docker exec`, reusing `ssmTargets.<env>.instanceIds` entries as container names.
 - `src/shared.ts`: shared CLI errors, IO, and formatting helpers.
 - `tenants.yml`: initial tenant registry with resource references only.
 - `deployctl.sim.config.yml`: simulation config (`adapterMode: sim`) for the Docker-based demo lane; values are simulation fixtures, not confirmed Phase 0 facts.
+- `tenants.sim.yml`: tenant registry for the Docker demo lane; secret names must match `docker/sim/app-server/secret-fixtures.json`.
+- `docker-compose.sim.yml`, `docker/sim/app-server/`: Sim Phase 2 "EC2 app-server" container (Dockerfile, entrypoint, health server, secret fixtures).
+- `scripts/ec2/deploy-backend.sh`: EC2-local backend deploy script, run for real via SSM in production or via `docker exec` in the simulation; path-parameterized (release root, tenant base dir, OS user) so cutover is a config change.
 - `test/`: Node test runner tests for public CLI and config behavior.
 
 ## Architecture
@@ -258,10 +262,14 @@ Current paths:
 - `src/core/history.ts`: deploy history event validation, current-state validation, repository seam, and in-memory repository.
 - `src/adapters/git.ts`: Git CLI ref resolver adapter.
 - `src/adapters/filesystem-history.ts`: filesystem-backed `DeployHistoryRepository` adapter used when `adapterMode: sim`.
+- `src/adapters/docker-ssm.ts`: `SsmDeployExecutor` adapter used when `adapterMode: sim`; runs `scripts/ec2/deploy-backend.sh` via `docker exec`.
+- `scripts/ec2/deploy-backend.sh`: EC2-local backend deploy script (real SSM target or the sim container).
+- `docker-compose.sim.yml`, `docker/sim/app-server/`: Sim Phase 2 Docker "EC2 app-server" lab.
 - `src/shared.ts`: shared errors and IO formatting.
 - `test/cli.test.ts`: public CLI behavior tests, including `deployctl status` reading simulated current state via `deployctl.sim.config.yml`.
 - `test/config.test.ts`: config loading and validation behavior tests.
 - `test/filesystem-history.test.ts`: `FileSystemDeployHistoryRepository` behavior tests (append-only events, current state, `inProgress` guardrail).
+- `test/docker-ssm.test.ts`: `DockerSimSsmDeployExecutor` behavior tests (env vars passed to the container, per-instance success/failure, `asg` rejection) with a mocked `docker` runner.
 - `test/tenants.test.ts`: tenant registry validation behavior tests.
 - `test/refs.test.ts`: ref resolution policy behavior tests.
 - `test/history.test.ts`: deploy history/current-state behavior tests.
@@ -269,8 +277,9 @@ Current paths:
 - `test/diagnostics.test.ts`: status query and rendering behavior tests.
 - `test/cleanup.test.ts`: retention decision, candidate derivation, and per-target plan behavior tests.
 - `package.json`, `package-lock.json`, `tsconfig.json`: Node package metadata and TypeScript configuration.
-- `deployctl.config.yml`: project-wide config for AWS region, app repository, build commands, deploy history/artifact locations, ref policies, and retention settings. Some values are placeholders until Phase 0 discovery confirms them. Includes `adapterMode: aws | sim` (default `aws`); only `sim` selects the simulation adapters below.
+- `deployctl.config.yml`: project-wide config for AWS region, app repository, build commands, deploy history/artifact locations, ref policies, retention, and `backendDeploy` (release root/OS user) settings. Some values are placeholders until Phase 0 discovery confirms them. Includes `adapterMode: aws | sim` (default `aws`); only `sim` selects the simulation adapters below.
 - `tenants.yml`: tenant registry with environment/tenant resource mappings. Current values are starter references and should be confirmed before real deploy use.
+- `tenants.sim.yml`: tenant registry for the Docker demo lane.
 - `docs/phase-0-simulation-plan.md`: plan for a local Docker Compose lab using simulated adapters behind the same core seams.
 - `docs/phase-0-real-cutover.md`: replacement checklist for moving from simulation to real AWS adapters and confirmed Phase 0 values.
 
@@ -305,11 +314,14 @@ node --import tsx src/cli.ts rollback frontend --tenant client1 --env staging
 node --import tsx src/cli.ts cleanup releases --env staging --dry-run
 node --import tsx src/cli.ts cleanup artifacts --env staging --dry-run
 node --import tsx src/cli.ts status --tenant client1 --env staging --config deployctl.sim.config.yml
+docker compose -f docker-compose.sim.yml up -d --build
+node --import tsx src/cli.ts deploy backend --tenant client1 --env staging --ref main --config deployctl.sim.config.yml --tenants tenants.sim.yml
+docker compose -f docker-compose.sim.yml down -v
 ```
 
-The `deploy`, `rollback`, and `cleanup` commands currently validate inputs offline and then fail clearly that the work is still pending; they make no AWS or network calls until the SSM/S3/build adapters land. Deploy/rollback validate tenant/env existence (and, for backend, a configured SSM target selector); `rollback --version` is optional (omit to target the previous version); cleanup validates the environment against the tenant registry and defaults to dry-run.
+The `deploy frontend`, `rollback`, and `cleanup` commands currently validate inputs offline and then fail clearly that the work is still pending; they make no AWS or network calls until the S3/build adapters land. They validate tenant/env existence (and, for backend rollback, a configured SSM target selector); `rollback --version` is optional (omit to target the previous version); cleanup validates the environment against the tenant registry and defaults to dry-run.
 
-`status` behaves the same way under the default `aws` adapter mode. With `--config deployctl.sim.config.yml` (`adapterMode: sim`), `status` instead reads real current-state records from `FileSystemDeployHistoryRepository` under `.deployctl-sim/` (Sim Phase 1) — no other command reads simulation state yet. `DEPLOYCTL_SIM_ROOT` overrides the `.deployctl-sim` root, mainly for test isolation.
+`status` and `deploy backend` behave the same pending way under the default `aws` adapter mode. With `--config deployctl.sim.config.yml` (`adapterMode: sim`): `status` reads real current-state records from `FileSystemDeployHistoryRepository` under `.deployctl-sim/` (Sim Phase 1); `deploy backend` runs the existing `deployBackend` orchestration for real against the `docker-compose.sim.yml` app-server container via `DockerSimSsmDeployExecutor` (Sim Phase 2, `docker exec`-ing `scripts/ec2/deploy-backend.sh`), resolving `--ref` through `GitCliRefResolver` pointed at this repo. No other command reads/writes simulation state yet. `DEPLOYCTL_SIM_ROOT` overrides the `.deployctl-sim` root, mainly for test isolation.
 
 Proposed operator commands from the architecture:
 
@@ -337,7 +349,7 @@ Repository gaps:
 - No Bitbucket pipeline config exists yet.
 - No deploy history schemas exist yet.
 - No IAM policies exist yet.
-- Sim Phase 1 (local persistence) is implemented: `adapterMode: sim`, `deployctl.sim.config.yml`, and `FileSystemDeployHistoryRepository` wired into `status`. No Docker container, backend deploy executor, frontend artifact adapters, or logs adapter exist yet — see `docs/phase-0-simulation-plan.md` for the remaining Sim Phases.
+- Sim Phase 1 (local persistence: `adapterMode`, `FileSystemDeployHistoryRepository` wired into `status`) and Sim Phase 2 (backend container: `docker-compose.sim.yml`, `scripts/ec2/deploy-backend.sh`, `DockerSimSsmDeployExecutor` wired into `deploy backend`) are implemented. No frontend artifact adapters, logs adapter, or production/multi-instance simulation exist yet — see `docs/phase-0-simulation-plan.md` for the remaining Sim Phases. The Sim Phase 2 release directory is a metadata marker, not a real build (no fixture app repo/checkout yet).
 
 Architecture and implementation open questions (tracked as a working checklist in `docs/phase-0-checklist.md`, grouped by the AWS adapter each answer unblocks):
 
