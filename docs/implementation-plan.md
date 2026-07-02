@@ -369,16 +369,28 @@ Tasks:
 
 ## Phase 11: Cleanup And Retention
 
-Status: `Not started`
+Status: `In progress`
 
 Goal: provide explicit cleanup for old backend releases and frontend artifacts.
 
 Tasks:
 
-- Keep current versions.
-- Keep last 10 successful versions per tenant/app.
-- Keep anything deployed in the last 30 days.
-- Add dry-run cleanup commands before any destructive cleanup.
+- [x] Keep current versions.
+- [x] Keep last 10 successful versions per tenant/app.
+- [x] Keep anything deployed in the last 30 days.
+- [ ] Add dry-run cleanup commands before any destructive cleanup.
+
+Progress:
+
+- Added `src/core/cleanup.ts` with `planRetention(...)`: pure decision logic that keeps a version if it is current, among the newest `successfulVersionsPerTarget` by last successful deploy, or deployed within `keepDays`; everything else is deletable. Each decision carries its keep reasons.
+- Added `deploymentRetentionCandidates(...)` (derives candidates from a target's history — backend releases keyed by commit, frontend artifacts keyed by recorded `artifactStorageKey`) and `planTargetRetention(...)` (reads history + current state through the repository seam and applies the policy). The plan is the dry-run view; deletion is a separate adapter concern.
+- Tests cover the newest-N rule, the keepDays window, current-version protection, backend/frontend candidate derivation, and the end-to-end target plan (repository mocked in-memory).
+
+Still pending (needs Phase 0 confirmation + real AWS before it can be verified end to end):
+
+- Add the `deployctl cleanup releases|artifacts --env <e> [--tenant <t>] --dry-run` CLI controllers over `planTargetRetention`, defaulting to dry-run.
+- Add a `CleanupExecutor` seam and its S3 adapter to delete the `delete` set (old backend release directories and frontend artifact objects); wire it in behind an explicit non-dry-run flag.
+- Wire the S3-backed `DeployHistoryRepository` adapter so cleanup reads real history (shared with Phases 6-7).
 
 ## Phase 12: Bitbucket Pipeline Integration
 
