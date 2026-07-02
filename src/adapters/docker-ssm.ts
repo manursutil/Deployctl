@@ -20,7 +20,11 @@ const defaultRunDocker: DockerCommandRunner = async (args) => {
 export type DockerSimSsmDeployExecutorOptions = {
   releaseRoot: string;
   osUser: string;
+  /** Container path the deploy script writes simulated api/worker logs to (Sim Phase 4). */
+  logRoot?: string;
 };
+
+const DEFAULT_LOG_ROOT = "/opt/deployctl/logs";
 
 /**
  * Sim Phase 2 stand-in for the real SSM Run Command executor
@@ -75,6 +79,7 @@ export class DockerSimSsmDeployExecutor implements SsmDeployExecutor {
       DEPLOYCTL_WORKER_PROCESS: request.tenant.workerProcess,
       DEPLOYCTL_DB_SECRET_NAME: request.tenant.dbSecret,
       DEPLOYCTL_REDIS_SECRET_NAME: request.tenant.redisSecret,
+      DEPLOYCTL_LOG_ROOT: this.options.logRoot ?? DEFAULT_LOG_ROOT,
     };
   }
 }

@@ -134,7 +134,7 @@ Unblocks: the S3-backed history repository used by **every** command (deploy, ro
 
 ## D. Logs — CloudWatch adapter
 
-Unblocks: `deployctl logs` (Phase 9, `src/core/diagnostics.ts` extension).
+Unblocks: the real CloudWatch adapter behind the `LogQuery` seam (`src/core/logs.ts`). The seam, `getTenantLogs`, the `deployctl logs` controller, and a filesystem sim adapter already exist (Sim Phase 4); only the CloudWatch-specific naming/adapter remains.
 
 ### D1. CloudWatch log groups/streams
 - [ ] Confirm the log group naming per environment/service.
@@ -144,6 +144,8 @@ Unblocks: `deployctl logs` (Phase 9, `src/core/diagnostics.ts` extension).
 > _Answer:_
 >
 > **Record in:** config (log group/stream patterns), CONTEXT
+>
+> _Simulation answer (not confirmed real infra):_ Sim Phase 4 selects env/tenant/service by file path (`.deployctl-sim/logs/<env>/<tenant>/<service>.log`) and filters by an absolute `since` cutoff, standing in for a CloudWatch log group/stream + `startTime`. This proves the `LogQuery` seam and the `--service`/`--since` filter shape; it does not confirm the real log group/stream naming.
 
 ---
 

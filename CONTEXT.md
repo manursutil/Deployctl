@@ -40,11 +40,13 @@ Current files:
 - `src/core/rollback.ts`: backend/frontend rollback orchestration (`rollbackBackend`/`rollbackFrontend`) and version selection (`selectRollbackTarget`) over the same history, guardrail, SSM executor, and frontend sync/smoke-check seams.
 - `src/core/diagnostics.ts`: status query (`getTenantStatus`) over the `DeployHistoryRepository` seam and CLI rendering (`formatTenantStatus`); reports current state per `<env>/<tenant>/<app>` including the `inProgress` guardrail.
 - `src/core/cleanup.ts`: retention decision logic (`planRetention`), candidate derivation from history (`deploymentRetentionCandidates`), and the per-target plan (`planTargetRetention`) over the `DeployHistoryRepository` seam; produces a dry-run keep/delete plan with reasons.
+- `src/core/logs.ts`: logs query (`getTenantLogs`) over the `LogQuery` seam plus `parseSinceDuration`/`parseLogService`/`formatLogEntries`; parses `--since` to an absolute cutoff and returns entries oldest-first.
 - `src/adapters/git.ts`: Git CLI adapter for resolving refs from the application repository.
 - `src/adapters/filesystem-history.ts`: `FileSystemDeployHistoryRepository`, a filesystem-backed `DeployHistoryRepository` for the Sim Phase 1 simulation lane (docs/phase-0-simulation-plan.md), storing events/current state under `.deployctl-sim/history/deploys/<env>/<tenant>/<app>/`.
 - `src/adapters/docker-ssm.ts`: `DockerSimSsmDeployExecutor`, the Sim Phase 2 `SsmDeployExecutor` that runs `scripts/ec2/deploy-backend.sh` in the Docker app-server container via `docker exec`, reusing `ssmTargets.<env>.instanceIds` entries as container names.
 - `src/adapters/filesystem-frontend.ts`: Sim Phase 3 `FileSystemFrontendArtifactStore` (stores artifacts under `.deployctl-sim/artifacts/<storageKey>`) and `FileSystemFrontendSync` (copies to `.deployctl-sim/frontend-buckets/<bucket>/index.html`).
 - `src/adapters/fixture-frontend.ts`: Sim Phase 3 `FixtureFrontendBuilder` (synthesizes an `index.html` embedding commit/env/tenant/build variables, no real build) and `NoopFrontendSmokeCheck` (always healthy; no HTTP server stood up in the sim).
+- `src/adapters/filesystem-logs.ts`: Sim Phase 4 `FileSystemLogQuery` reading newline-delimited JSON entries from `.deployctl-sim/logs/<env>/<tenant>/<service>.log`, filtered by the `since` cutoff.
 - `src/shared.ts`: shared CLI errors, IO, and formatting helpers.
 - `tenants.yml`: initial tenant registry with resource references only.
 - `deployctl.sim.config.yml`: simulation config (`adapterMode: sim`) for the Docker-based demo lane; values are simulation fixtures, not confirmed Phase 0 facts.
@@ -242,7 +244,7 @@ Suggested future module seams, once code exists:
 - Deploy history/current-state repository: core schemas and repository seam are implemented in `src/core/history.ts`; S3 persistence adapter is still pending.
 - Backend SSM deployment orchestration.
 - Frontend artifact and S3 sync orchestration.
-- Status and logs queries: status is implemented in `src/core/diagnostics.ts`; logs and the S3 history adapter are still pending.
+- Status and logs queries: status is implemented in `src/core/diagnostics.ts` and logs in `src/core/logs.ts` (the `LogQuery` seam); both have filesystem sim adapters, while the S3 history and CloudWatch Logs adapters are still pending.
 - Rollback orchestration: implemented in `src/core/rollback.ts`; `deployctl rollback backend|frontend` CLI controllers validate offline and report the pending boundary; AWS adapters still pending.
 - Cleanup and retention: decision logic implemented in `src/core/cleanup.ts`; `deployctl cleanup releases|artifacts` CLI controllers validate offline and report the pending boundary; the S3 history adapter and deletion executor still pending.
 
@@ -267,7 +269,8 @@ Current paths:
 - `src/adapters/docker-ssm.ts`: `SsmDeployExecutor` adapter used when `adapterMode: sim`; runs `scripts/ec2/deploy-backend.sh` via `docker exec`.
 - `src/adapters/filesystem-frontend.ts`: `FrontendArtifactStore`/`FrontendSync` adapters used when `adapterMode: sim`.
 - `src/adapters/fixture-frontend.ts`: `FrontendBuilder`/`FrontendSmokeCheck` adapters used when `adapterMode: sim`.
-- `scripts/ec2/deploy-backend.sh`: EC2-local backend deploy script (real SSM target or the sim container).
+- `src/adapters/filesystem-logs.ts`: `LogQuery` adapter used when `adapterMode: sim`; reads `.deployctl-sim/logs/<env>/<tenant>/<service>.log`.
+- `scripts/ec2/deploy-backend.sh`: EC2-local backend deploy script (real SSM target or the sim container); also emits sim-only api/worker log fixtures when `DEPLOYCTL_LOG_ROOT` is set.
 - `docker-compose.sim.yml`, `docker/sim/app-server/`: Sim Phase 2 Docker "EC2 app-server" lab.
 - `src/shared.ts`: shared errors and IO formatting.
 - `test/cli.test.ts`: public CLI behavior tests, including `deployctl status` reading simulated current state via `deployctl.sim.config.yml`.
@@ -276,6 +279,8 @@ Current paths:
 - `test/docker-ssm.test.ts`: `DockerSimSsmDeployExecutor` behavior tests (env vars passed to the container, per-instance success/failure, `asg` rejection) with a mocked `docker` runner.
 - `test/filesystem-frontend.test.ts`: frontend artifact store/sync + `deployFrontend`/`rollbackFrontend` integration behavior (build/reuse/changed-variable/rollback-resync).
 - `test/fixture-frontend.test.ts`: `FixtureFrontendBuilder` content/identity and `NoopFrontendSmokeCheck` behavior.
+- `test/logs.test.ts`: `getTenantLogs`/`parseSinceDuration`/`parseLogService`/`formatLogEntries` behavior (fake `LogQuery` seam).
+- `test/filesystem-logs.test.ts`: `FileSystemLogQuery` behavior tests (path selection, `since` filtering, missing file, malformed line).
 - `test/tenants.test.ts`: tenant registry validation behavior tests.
 - `test/refs.test.ts`: ref resolution policy behavior tests.
 - `test/history.test.ts`: deploy history/current-state behavior tests.
@@ -324,12 +329,13 @@ docker compose -f docker-compose.sim.yml up -d --build
 node --import tsx src/cli.ts deploy backend --tenant client1 --env staging --ref main --config deployctl.sim.config.yml --tenants tenants.sim.yml
 node --import tsx src/cli.ts deploy frontend --tenant client1 --env staging --ref main --config deployctl.sim.config.yml --tenants tenants.sim.yml
 node --import tsx src/cli.ts rollback frontend --tenant client1 --env staging --config deployctl.sim.config.yml --tenants tenants.sim.yml
+node --import tsx src/cli.ts logs --tenant client1 --env staging --service api --since 1h --config deployctl.sim.config.yml --tenants tenants.sim.yml
 docker compose -f docker-compose.sim.yml down -v
 ```
 
 The `cleanup` commands (and, under the default `aws` mode, all deploy/rollback commands) validate inputs offline and then fail clearly that the work is still pending; they make no AWS or network calls until the S3/build adapters land. They validate tenant/env existence (and, for backend deploy/rollback, a configured SSM target selector); `rollback --version` is optional (omit to target the previous version); cleanup validates the environment against the tenant registry and defaults to dry-run.
 
-With `--config deployctl.sim.config.yml` (`adapterMode: sim`), the deploy/rollback/status commands run for real against the simulation instead of throwing the pending error: `status` reads current-state records from `FileSystemDeployHistoryRepository` under `.deployctl-sim/` (Sim Phase 1); `deploy backend`/`rollback backend` run the existing orchestration against the `docker-compose.sim.yml` app-server container via `DockerSimSsmDeployExecutor` (Sim Phase 2); `deploy frontend`/`rollback frontend` run through the filesystem artifact store/sync, `FixtureFrontendBuilder`, and `NoopFrontendSmokeCheck` (Sim Phase 3), resolving `--ref` through `GitCliRefResolver` pointed at this repo. `cleanup` and `logs` are not wired for sim yet. `DEPLOYCTL_SIM_ROOT` overrides the `.deployctl-sim` root, mainly for test isolation.
+With `--config deployctl.sim.config.yml` (`adapterMode: sim`), the deploy/rollback/status/logs commands run for real against the simulation instead of throwing the pending error: `status` reads current-state records from `FileSystemDeployHistoryRepository` under `.deployctl-sim/` (Sim Phase 1); `deploy backend`/`rollback backend` run the existing orchestration against the `docker-compose.sim.yml` app-server container via `DockerSimSsmDeployExecutor` (Sim Phase 2); `deploy frontend`/`rollback frontend` run through the filesystem artifact store/sync, `FixtureFrontendBuilder`, and `NoopFrontendSmokeCheck` (Sim Phase 3), resolving `--ref` through `GitCliRefResolver` pointed at this repo; `logs` reads `FileSystemLogQuery` entries the backend deploy wrote under `.deployctl-sim/logs/` (Sim Phase 4). `cleanup` is not wired for sim yet. `DEPLOYCTL_SIM_ROOT` overrides the `.deployctl-sim` root, mainly for test isolation.
 
 Proposed operator commands from the architecture:
 
@@ -357,7 +363,7 @@ Repository gaps:
 - No Bitbucket pipeline config exists yet.
 - No deploy history schemas exist yet.
 - No IAM policies exist yet.
-- Sim Phase 1 (local persistence: `adapterMode`, `FileSystemDeployHistoryRepository` wired into `status`), Sim Phase 2 (backend container: `docker-compose.sim.yml`, `scripts/ec2/deploy-backend.sh`, `DockerSimSsmDeployExecutor` wired into `deploy backend`), and Sim Phase 3 (frontend artifacts + rollback: `FileSystemFrontendArtifactStore`/`FileSystemFrontendSync`, `FixtureFrontendBuilder`, `deploy frontend` and both `rollback` controllers wired for sim) are implemented. No logs adapter or production/multi-instance simulation exist yet — see `docs/phase-0-simulation-plan.md` for the remaining Sim Phases. Both the Sim Phase 2 backend release directory and the Sim Phase 3 frontend artifact are synthesized markers, not real builds (no fixture app repo/checkout yet).
+- Sim Phase 1 (local persistence: `adapterMode`, `FileSystemDeployHistoryRepository` wired into `status`), Sim Phase 2 (backend container: `docker-compose.sim.yml`, `scripts/ec2/deploy-backend.sh`, `DockerSimSsmDeployExecutor` wired into `deploy backend`), Sim Phase 3 (frontend artifacts + rollback: `FileSystemFrontendArtifactStore`/`FileSystemFrontendSync`, `FixtureFrontendBuilder`, `deploy frontend` and both `rollback` controllers wired for sim), and Sim Phase 4 (logs: `LogQuery` core seam, `FileSystemLogQuery`, `deployctl logs` controller, container-written log fixtures) are implemented. No production/multi-instance simulation exists yet — see `docs/phase-0-simulation-plan.md` for the remaining Sim Phases (production replacement demo, runbook). Both the Sim Phase 2 backend release directory and the Sim Phase 3 frontend artifact are synthesized markers, not real builds (no fixture app repo/checkout yet).
 
 Architecture and implementation open questions (tracked as a working checklist in `docs/phase-0-checklist.md`, grouped by the AWS adapter each answer unblocks):
 

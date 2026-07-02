@@ -3,11 +3,13 @@ import { DockerSimSsmDeployExecutor } from "./adapters/docker-ssm.js";
 import { FixtureFrontendBuilder, NoopFrontendSmokeCheck } from "./adapters/fixture-frontend.js";
 import { FileSystemDeployHistoryRepository } from "./adapters/filesystem-history.js";
 import { FileSystemFrontendArtifactStore, FileSystemFrontendSync } from "./adapters/filesystem-frontend.js";
+import { FileSystemLogQuery } from "./adapters/filesystem-logs.js";
 import { GitCliRefResolver } from "./adapters/git.js";
 import { loadDeployctlConfig } from "./core/config.js";
 import { deployBackend } from "./core/deploy.js";
 import { formatTenantStatus, getTenantStatus } from "./core/diagnostics.js";
 import { deployFrontend } from "./core/frontend.js";
+import { formatLogEntries, getTenantLogs, parseLogService } from "./core/logs.js";
 import { rollbackBackend, rollbackFrontend } from "./core/rollback.js";
 import { getTenantConfig, listTenants, loadTenantRegistry } from "./core/tenants.js";
 import { DeployctlError, formatError, type Io } from "./shared.js";
@@ -79,6 +81,10 @@ export async function runCli(argv: string[], io: Io = { stdout: process.stdout, 
 
     if (args[0] === "rollback" && args[1] === "frontend") {
       return await runRollbackFrontend(args, io);
+    }
+
+    if (args[0] === "logs") {
+      return await runLogs(args, io);
     }
 
     if (args[0] === "cleanup") {
@@ -340,6 +346,37 @@ async function runRollbackFrontend(args: string[], io: Io): Promise<number> {
   // re-sync) are still pending Phase 0 confirmation, so no real rollback runs yet.
   throw new DeployctlError(
     `Frontend rollback for ${environment}/${tenant} is not yet executable: the S3 sync and deploy history adapters are pending (Phase 8).`,
+  );
+}
+
+async function runLogs(args: string[], io: Io): Promise<number> {
+  const tenant = requiredOption(args, "--tenant");
+  const environment = requiredOption(args, "--env");
+  const service = parseLogService(requiredOption(args, "--service"));
+  const since = requiredOption(args, "--since");
+
+  const config = await loadDeployctlConfig(optionValue(args, "--config") ?? "deployctl.config.yml");
+  const registry = await loadTenantRegistry(optionValue(args, "--tenants") ?? "tenants.yml");
+
+  // Validate the tenant/env offline before reporting the pending boundary.
+  getTenantConfig(registry, environment, tenant);
+
+  io.stdout.write(`Validated logs query for ${environment}/${tenant}/${service} (since ${since}).\n`);
+
+  // Sim Phase 4 (docs/phase-0-simulation-plan.md): adapterMode: sim reads log
+  // entries from the filesystem logs adapter instead of the pending CloudWatch adapter.
+  if (config.adapterMode === "sim") {
+    const logs = new FileSystemLogQuery(process.env.DEPLOYCTL_SIM_ROOT);
+    const entries = await getTenantLogs(logs, { env: environment, tenant, service, since });
+    io.stdout.write(formatLogEntries(entries));
+    return 0;
+  }
+
+  // getTenantLogs is implemented and unit-tested behind the LogQuery seam, but the
+  // CloudWatch Logs adapter and its log group/stream naming are still pending Phase 0
+  // confirmation, so no live logs can be read yet.
+  throw new DeployctlError(
+    `Logs for ${environment}/${tenant}/${service} are not yet readable: the CloudWatch Logs adapter is pending (Phase 9).`,
   );
 }
 

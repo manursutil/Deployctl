@@ -86,7 +86,7 @@ Status: `Not started`
 
 Goal: confirm infrastructure assumptions before concrete AWS-facing implementation.
 
-Interim demo path: `docs/phase-0-simulation-plan.md` defines a Docker-based simulation lane so the deployment model can be demonstrated and the remaining adapters can be developed without waiting for real Phase 0 answers. That simulation does not mark Phase 0 tasks as confirmed; real cutover work is tracked in `docs/phase-0-real-cutover.md`. Sim Phase 1 (local persistence: `adapterMode`, `FileSystemDeployHistoryRepository`, `deployctl status` reading simulated state), Sim Phase 2 (backend container: Docker app-server, `scripts/ec2/deploy-backend.sh`, `DockerSimSsmDeployExecutor`, `deployctl deploy backend` running end to end against it), and Sim Phase 3 (frontend artifacts + rollback: `FileSystemFrontendArtifactStore`/`FileSystemFrontendSync`, `FixtureFrontendBuilder`, `deployctl deploy frontend` and both `rollback` controllers wired for `adapterMode: sim`) are done; see the simulation plan for remaining Sim Phases (logs, production replacement demo, runbook).
+Interim demo path: `docs/phase-0-simulation-plan.md` defines a Docker-based simulation lane so the deployment model can be demonstrated and the remaining adapters can be developed without waiting for real Phase 0 answers. That simulation does not mark Phase 0 tasks as confirmed; real cutover work is tracked in `docs/phase-0-real-cutover.md`. Sim Phase 1 (local persistence: `adapterMode`, `FileSystemDeployHistoryRepository`, `deployctl status` reading simulated state), Sim Phase 2 (backend container: Docker app-server, `scripts/ec2/deploy-backend.sh`, `DockerSimSsmDeployExecutor`, `deployctl deploy backend` running end to end against it), Sim Phase 3 (frontend artifacts + rollback: `FileSystemFrontendArtifactStore`/`FileSystemFrontendSync`, `FixtureFrontendBuilder`, `deployctl deploy frontend` and both `rollback` controllers wired for `adapterMode: sim`), and Sim Phase 4 (logs: net-new `LogQuery` core seam + `getTenantLogs`, `FileSystemLogQuery`, `deployctl logs` controller, container-written log fixtures) are done; see the simulation plan for remaining Sim Phases (production replacement demo, runbook).
 
 Work this phase from `docs/phase-0-checklist.md`, which restates the tasks below as concrete questions grouped by the AWS adapter each answer unblocks. Every orchestration module is already implemented behind a seam, so Phase 0 is the remaining gate for AWS-facing execution.
 
@@ -340,20 +340,21 @@ Goal: expose operational status and CloudWatch logs through the CLI.
 Tasks:
 
 - [x] Implement `deployctl status` (core).
-- [ ] Implement `deployctl logs` from CloudWatch Logs.
-- [ ] Filter logs by environment, tenant, service, and time range.
+- [x] Implement `deployctl logs` (core `LogQuery` seam + controller; CloudWatch adapter still pending Phase 0).
+- [x] Filter logs by environment, tenant, service, and time range.
 - [ ] Show SSM command IDs and per-instance results where relevant.
 
 Progress:
 
 - Added `src/core/diagnostics.ts` with `getTenantStatus(...)`: a pure query over the `DeployHistoryRepository` seam that reports current state per `<env>/<tenant>/<app>` (default apps backend + frontend), including the `inProgress` guardrail and marking apps with no record as not deployed. Added `formatTenantStatus(...)` for one-line-per-target CLI rendering.
 - Added the `deployctl status --tenant <t> --env <e>` CLI controller. It validates tenant/env offline (no AWS or network), then fails clearly that live status reads need the S3-backed history adapter.
-- Tests cover current-state reporting, the not-deployed case, the `inProgress` surface, the app filter, and the rendered output (repository mocked in-memory); CLI tests cover unknown-tenant rejection and the pending boundary.
+- Added `src/core/logs.ts` with the `LogQuery` seam and `getTenantLogs(...)`: parses the `--since` duration into an absolute cutoff (mirroring the CloudWatch `startTime`), queries the seam, and returns entries oldest-first; plus `parseSinceDuration`, `parseLogService`, and `formatLogEntries`. Added the `deployctl logs --tenant <t> --env <e> --service <api|worker> --since <dur>` CLI controller, wired to a filesystem logs adapter under `adapterMode: sim` and reporting the pending CloudWatch boundary otherwise (Sim Phase 4).
+- Tests cover current-state reporting, the not-deployed case, the `inProgress` surface, the app filter, and the rendered output (repository mocked in-memory); logs tests cover duration parsing, service validation, query orchestration/sorting, and formatting; CLI tests cover unknown-tenant/unknown-service rejection, the pending boundary, and a sim-mode logs query filtered by service and time range.
 
 Still pending (needs Phase 0 confirmation + real AWS before it can be verified end to end):
 
 - Wire the S3-backed `DeployHistoryRepository` adapter into the `status` controller so it reads real `current.json` records (shared with Phases 6-7).
-- `deployctl logs`: confirm CloudWatch log group and stream naming (Phase 0), add the CloudWatch Logs adapter, and filter by env/tenant/service/time range.
+- `deployctl logs`: the core seam, controller, and filesystem sim adapter now exist; the remaining real-AWS work is to confirm CloudWatch log group and stream naming (Phase 0) and add the CloudWatch Logs adapter behind the same `LogQuery` seam.
 - Surface SSM command IDs and per-instance results in status where relevant, once the SSM adapter records them.
 
 Done when: `deployctl status` reports current state per `<env>/<tenant>/<app>` and `deployctl logs` returns filtered CloudWatch entries for a given env/tenant/service, both covered by a test (live AWS calls mocked).

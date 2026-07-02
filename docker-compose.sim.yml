@@ -7,6 +7,9 @@ services:
     volumes:
       - sherwood-staging:/opt/sherwood
       - ./scripts/ec2:/opt/deployctl/scripts:ro
+      # Host-visible so `deployctl logs` (which reads .deployctl-sim/logs on the host)
+      # can read the api/worker log lines the deploy script writes (Sim Phase 4).
+      - ./.deployctl-sim/logs:/opt/deployctl/logs
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 5s

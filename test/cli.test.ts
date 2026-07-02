@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -221,6 +221,57 @@ test("deployctl status surfaces the inProgress guardrail from simulated current 
 
   assert.equal(result.status, 0);
   assert.match(result.stdout, /deploy in progress: dep_20260701_100000/);
+});
+
+test("deployctl logs reports the pending boundary under the default aws adapter mode", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "src/cli.ts", "logs", "--tenant", "client1", "--env", "staging", "--service", "api", "--since", "1h"],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /not yet readable/);
+});
+
+test("deployctl logs rejects an unknown service before any query", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "src/cli.ts", "logs", "--tenant", "client1", "--env", "staging", "--service", "db", "--since", "1h"],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /--service must be "api" or "worker"/);
+});
+
+test("deployctl logs reads simulated log entries filtered by service and since when adapterMode is sim", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "deployctl-sim-logs-"));
+  const configPath = await writeSimConfig(dir);
+  const tenantsPath = join(dir, "tenants.yml");
+  await writeFile(tenantsPath, simTenantsYaml);
+
+  const simRoot = join(dir, ".deployctl-sim");
+  const apiDir = join(simRoot, "logs", "staging", "client1");
+  await mkdir(apiDir, { recursive: true });
+  const now = Date.now();
+  const recent = new Date(now - 5 * 60 * 1000).toISOString();
+  const old = new Date(now - 3 * 60 * 60 * 1000).toISOString();
+  const entry = (timestamp: string, service: string, message: string) =>
+    JSON.stringify({ timestamp, env: "staging", tenant: "client1", service, message });
+  await writeFile(join(apiDir, "api.log"), `${entry(old, "api", "api too old")}\n${entry(recent, "api", "api recent")}\n`);
+  await writeFile(join(apiDir, "worker.log"), `${entry(recent, "worker", "worker recent")}\n`);
+
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", cliPath, "logs", "--tenant", "client1", "--env", "staging", "--service", "api", "--since", "1h", "--config", configPath, "--tenants", tenantsPath],
+    { encoding: "utf8", env: { ...process.env, DEPLOYCTL_SIM_ROOT: simRoot } },
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /api recent/);
+  assert.doesNotMatch(result.stdout, /api too old/);
+  assert.doesNotMatch(result.stdout, /worker recent/);
 });
 
 test("deployctl deploy frontend builds and stores an artifact when adapterMode is sim, then reuses it on repeat", async () => {

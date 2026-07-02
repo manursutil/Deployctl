@@ -66,6 +66,7 @@ test("runBackendDeploy execs the deploy script in the target container with the 
     DEPLOYCTL_WORKER_PROCESS: "sherwood-worker-client1",
     DEPLOYCTL_DB_SECRET_NAME: "skincair/staging/db/client1",
     DEPLOYCTL_REDIS_SECRET_NAME: "skincair/staging/redis",
+    DEPLOYCTL_LOG_ROOT: "/opt/deployctl/logs",
   });
 });
 
