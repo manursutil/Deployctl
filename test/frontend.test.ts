@@ -20,6 +20,7 @@ import { DeployctlError } from "../src/shared.js";
 const commit = "0123456789abcdef0123456789abcdef01234567";
 
 const config: DeployctlConfig = {
+  adapterMode: "aws",
   aws: { region: "eu-west-1" },
   applicationRepository: { url: "ssh://git@bitbucket.org/example/app.git" },
   build: {

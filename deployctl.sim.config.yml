@@ -1,0 +1,50 @@
+# Simulation config for the Phase 0 Docker-based demo lane.
+# See docs/phase-0-simulation-plan.md. Values here are simulation fixtures,
+# not confirmed Phase 0 infrastructure facts.
+adapterMode: sim
+
+aws:
+  region: eu-west-1
+
+applicationRepository:
+  url: ssh://git@bitbucket.org/example/application-monorepo.git
+
+build:
+  backend:
+    packageManager: npm
+    installCommand: npm ci
+    buildCommand: npm run build
+  frontend:
+    packageManager: npm
+    installCommand: npm ci
+    buildCommand: npm run build
+    buildConfigIdentityInputs:
+      - VITE_TENANT
+      - VITE_ENVIRONMENT
+
+deployHistory:
+  bucket: deployctl-sim-deploy-history
+  prefix: deploys
+
+frontendArtifacts:
+  bucket: deployctl-sim-deploy-artifacts
+  prefix: frontend
+
+refPolicies:
+  staging:
+    allowMovingBranches: true
+  production:
+    allowMovingBranches: false
+
+ssmTargets:
+  staging:
+    mode: instanceIds
+    instanceIds:
+      - i-0000000000staging0
+  production:
+    mode: asg
+    autoScalingGroupName: sherwood-production-asg
+
+retention:
+  successfulVersionsPerTarget: 10
+  keepDays: 30

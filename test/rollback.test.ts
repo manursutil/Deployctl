@@ -23,6 +23,7 @@ const commitB = "b".repeat(40);
 const commitC = "c".repeat(40);
 
 const config: DeployctlConfig = {
+  adapterMode: "aws",
   aws: { region: "eu-west-1" },
   applicationRepository: { url: "ssh://git@bitbucket.org/example/app.git" },
   build: {

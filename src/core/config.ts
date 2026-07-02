@@ -2,7 +2,10 @@ import { readFile } from "node:fs/promises";
 import { parse } from "yaml";
 import { DeployctlError } from "../shared.js";
 
+export type AdapterMode = "aws" | "sim";
+
 export type DeployctlConfig = {
+  adapterMode: AdapterMode;
   aws: {
     region: string;
   };
@@ -75,6 +78,7 @@ export function parseDeployctlConfig(value: unknown, sourceName = "deployctl.con
   const retention = objectAt(root.retention, `${sourceName}.retention`);
 
   return {
+    adapterMode: adapterMode(root.adapterMode, `${sourceName}.adapterMode`),
     aws: {
       region: nonEmptyString(aws, `${sourceName}.aws.region`, "region"),
     },
@@ -100,6 +104,18 @@ export function parseDeployctlConfig(value: unknown, sourceName = "deployctl.con
       keepDays: positiveInteger(retention.keepDays, `${sourceName}.retention.keepDays`),
     },
   };
+}
+
+function adapterMode(value: unknown, path: string): AdapterMode {
+  if (value === undefined) {
+    return "aws";
+  }
+
+  if (value === "aws" || value === "sim") {
+    return value;
+  }
+
+  throw new DeployctlError(`${path} must be "aws" or "sim"`);
 }
 
 function buildConfig(value: unknown, path: string): BuildConfig {
