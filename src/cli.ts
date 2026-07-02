@@ -1,6 +1,9 @@
 #!/usr/bin/env node
+import { DockerSimSsmDeployExecutor } from "./adapters/docker-ssm.js";
 import { FileSystemDeployHistoryRepository } from "./adapters/filesystem-history.js";
+import { GitCliRefResolver } from "./adapters/git.js";
 import { loadDeployctlConfig } from "./core/config.js";
+import { deployBackend } from "./core/deploy.js";
 import { formatTenantStatus, getTenantStatus } from "./core/diagnostics.js";
 import { getTenantConfig, listTenants, loadTenantRegistry } from "./core/tenants.js";
 import { DeployctlError, formatError, type Io } from "./shared.js";
@@ -133,6 +136,35 @@ async function runDeployBackend(args: string[], io: Io): Promise<number> {
   }
 
   io.stdout.write(`Validated backend deploy for ${environment}/${tenant} (ref ${requestedRef}).\n`);
+
+  // Sim Phase 2 (docs/phase-0-simulation-plan.md): adapterMode: sim runs the
+  // deploy through the Docker app-server container instead of the pending SSM
+  // executor, using the same deployBackend orchestration as the real path.
+  if (config.adapterMode === "sim") {
+    const result = await deployBackend({
+      env: environment,
+      tenant,
+      requestedRef,
+      actor: "cli",
+      config,
+      registry,
+      refResolver: new GitCliRefResolver(),
+      history: new FileSystemDeployHistoryRepository(process.env.DEPLOYCTL_SIM_ROOT),
+      executor: new DockerSimSsmDeployExecutor({
+        releaseRoot: config.backendDeploy.releaseRoot,
+        osUser: config.backendDeploy.osUser,
+      }),
+    });
+
+    if (result.status !== "success") {
+      throw new DeployctlError(
+        `Backend deploy ${result.status} for ${environment}/${tenant} (commit ${result.event.resolvedCommit}).`,
+      );
+    }
+
+    io.stdout.write(`Backend deploy succeeded for ${environment}/${tenant} (commit ${result.event.resolvedCommit}).\n`);
+    return 0;
+  }
 
   // The orchestration module (deployBackend) is implemented and unit-tested
   // behind the SsmDeployExecutor seam, but the production SSM executor and the
