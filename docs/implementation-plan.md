@@ -491,6 +491,8 @@ Decisions already made:
 - Audit: every dashboard-triggered deploy is recorded in deploy history with `deployedBy` set to the authenticated identity.
 - Tech stack: a small server-rendered TypeScript app (for example Express/Fastify with EJS or htmx), not a full SPA framework or Next.js.
 
+Design direction (locked, ahead of implementation): the dashboard's visual/UX direction is recorded in `docs/dashboard-design-direction.md` — the "Operations Ledger" mockup (`dashboard-mockups/mockup-operations-ledger.html`), with two parked alternatives in the same folder. The mockups are self-contained HTML for exploration only; this phase reproduces that visual language in the server-rendered stack below and drives behavior through the shared orchestration modules, not client-side JS.
+
 Open items to confirm before/during this phase:
 
 - Network restriction mechanism: possibly Google Identity-Aware Proxy (IAP), mentioned but not confirmed; IP-allowlisted security group is the fallback.

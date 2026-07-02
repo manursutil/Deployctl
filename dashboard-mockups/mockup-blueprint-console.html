@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>deployctl · Blueprint Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --navy:#081a2e; --navy-2:#0b2138; --panel:#0e2740; --panel-2:#123152;
+    --grid:#123a5c; --ink:#1d4a72; --ink-2:#2a6a9e;
+    --cyan:#59cfe4; --cyan-dim:#2b6f80; --paper:#d6e6f2; --muted:#7fa6c4; --muted-2:#557a99;
+    --amber:#f0b33f; --ok:#4fd6a0; --red:#ff6f74;
+    --disp:'Space Grotesk',sans-serif; --mono:'JetBrains Mono',monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    color:var(--paper); font-family:var(--disp); font-size:14px; line-height:1.45;
+    background:
+      linear-gradient(var(--grid) 1px, transparent 1px) 0 0/28px 28px,
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0/28px 28px,
+      radial-gradient(1000px 500px at 70% -5%, #0f2c48, transparent 70%),
+      var(--navy);
+    background-blend-mode:soft-light,soft-light,normal,normal;
+    -webkit-font-smoothing:antialiased;
+  }
+  .mono{font-family:var(--mono)}
+  .app{max-width:1280px;margin:0 auto;padding:0 22px 40px}
+
+  /* header as a title block, like a drawing sheet */
+  header{display:flex;align-items:stretch;gap:0;border:1px solid var(--ink);margin-top:22px;background:rgba(8,26,46,.7);backdrop-filter:blur(2px)}
+  header .cell{padding:12px 16px;border-right:1px solid var(--ink);display:flex;flex-direction:column;justify-content:center}
+  header .cell:last-child{border-right:0}
+  header .cell .lab{font-family:var(--mono);font-size:9px;letter-spacing:2px;color:var(--muted-2);text-transform:uppercase}
+  header .cell .val{font-weight:600;font-size:14px}
+  header .title{gap:2px}
+  header .title .val{font-size:19px;letter-spacing:.5px;display:flex;align-items:center;gap:9px}
+  header .title .val::before{content:'';width:10px;height:10px;background:var(--cyan);box-shadow:0 0 12px var(--cyan);border-radius:1px}
+  header .flex{flex:1}
+  .env-toggle{display:flex;align-items:center;gap:0;border:1px solid var(--ink-2);border-radius:2px;overflow:hidden}
+  .env-toggle button{background:transparent;border:0;color:var(--muted);font-family:var(--mono);font-size:11px;letter-spacing:1px;padding:7px 14px;cursor:pointer}
+  .env-toggle button.on[data-env=staging]{background:rgba(79,214,160,.15);color:var(--ok);box-shadow:inset 0 0 0 1px var(--ok)}
+  .env-toggle button.on[data-env=production]{background:rgba(255,111,116,.15);color:var(--red);box-shadow:inset 0 0 0 1px var(--red)}
+
+  /* tabs */
+  .tabs{display:flex;gap:2px;margin:18px 0 16px}
+  .tabs button{background:rgba(14,39,64,.6);border:1px solid var(--ink);color:var(--muted);font-family:var(--mono);font-size:12px;
+    letter-spacing:.5px;padding:9px 16px;cursor:pointer;border-radius:2px 2px 0 0}
+  .tabs button:hover{color:var(--paper)}
+  .tabs button.on{background:var(--panel);color:var(--cyan);border-bottom-color:var(--panel);box-shadow:inset 0 2px 0 var(--cyan)}
+  .tabs .df{margin-left:auto;font-size:9px;color:var(--muted-2);align-self:center;letter-spacing:1.5px}
+  .view{display:none}.view.on{display:block}
+
+  /* ---- SCHEMATIC (signature) ---- */
+  .schematic{border:1px solid var(--ink);background:rgba(8,26,46,.55);border-radius:2px;padding:6px}
+  .sch-head{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .sch-head .legend{display:flex;gap:16px}
+  .sch-head .legend span{display:inline-flex;align-items:center;gap:6px}
+  .dotc{width:8px;height:8px;border-radius:50%}
+  .dotc.ok{background:var(--ok);box-shadow:0 0 8px var(--ok)} .dotc.am{background:var(--amber);box-shadow:0 0 8px var(--amber)} .dotc.rd{background:var(--red);box-shadow:0 0 8px var(--red)}
+  svg .wire{stroke:var(--ink-2);stroke-width:1.5;fill:none}
+  svg .wire.live{stroke:var(--amber);stroke-width:2;stroke-dasharray:5 7;animation:flow 1s linear infinite}
+  @keyframes flow{to{stroke-dashoffset:-24}}
+  svg .node{fill:var(--panel);stroke:var(--ink-2);stroke-width:1.2}
+  svg .node.hot{stroke:var(--amber)}
+  svg text{fill:var(--paper);font-family:'JetBrains Mono',monospace}
+  svg .lab{fill:var(--muted);font-size:9px;letter-spacing:1px}
+  .pulse-dot{fill:var(--amber);filter:drop-shadow(0 0 4px var(--amber))}
+
+  /* target matrix under schematic */
+  .grid-wrap{display:grid;grid-template-columns:1fr 340px;gap:16px;margin-top:16px}
+  @media(max-width:1000px){.grid-wrap{grid-template-columns:1fr}}
+  .matrix{border:1px solid var(--ink);border-radius:2px;background:rgba(14,39,64,.5);overflow:hidden}
+  .matrix .mh{display:grid;grid-template-columns:1.4fr 1fr 1fr;font-family:var(--mono);font-size:10px;letter-spacing:1.5px;color:var(--muted-2);
+    padding:10px 14px;border-bottom:1px solid var(--ink);text-transform:uppercase}
+  .mrow{display:grid;grid-template-columns:1.4fr 1fr 1fr;padding:12px 14px;border-bottom:1px solid var(--ink);align-items:center}
+  .mrow:last-child{border-bottom:0}
+  .mrow:hover{background:rgba(18,49,82,.5)}
+  .mrow .tn{display:flex;flex-direction:column;gap:2px}
+  .mrow .tn b{font-weight:600} .mrow .tn small{font-family:var(--mono);color:var(--muted-2);font-size:11px}
+  .cellapp{cursor:pointer}
+  .cellapp .ver{font-family:var(--mono);font-size:13px;display:flex;align-items:center;gap:8px}
+  .cellapp .sub{font-family:var(--mono);font-size:10px;color:var(--muted-2);margin-top:3px}
+  .stat{width:7px;height:7px;border-radius:50%;flex:none}
+  .stat.ok{background:var(--ok);box-shadow:0 0 6px var(--ok)} .stat.am{background:var(--amber);box-shadow:0 0 6px var(--amber)}
+  .stat.rd{background:var(--red);box-shadow:0 0 6px var(--red)} .stat.off{background:#2a4258}
+
+  /* side inspector */
+  .inspector{border:1px solid var(--ink);border-radius:2px;background:rgba(14,39,64,.5)}
+  .inspector .ih{padding:11px 14px;border-bottom:1px solid var(--ink);font-family:var(--mono);font-size:11px;letter-spacing:1px;color:var(--cyan);text-transform:uppercase}
+  .inspector .ib{padding:14px}
+  .row{display:flex;justify-content:space-between;gap:10px;font-family:var(--mono);font-size:12px;padding:6px 0;border-bottom:1px dashed var(--ink)}
+  .row:last-child{border-bottom:0}.row .k{color:var(--muted-2)}
+  .badge{font-family:var(--mono);font-size:10px;padding:2px 8px;border-radius:2px;border:1px solid var(--cyan-dim);color:var(--cyan)}
+  .badge.ok{color:var(--ok);border-color:#2b6f5e}.badge.am{color:var(--amber);border-color:#7a5f1f}.badge.rd{color:var(--red);border-color:#7a2f31}
+
+  /* deploy form */
+  .deploybox{border:1px solid var(--ink);border-radius:2px;background:rgba(14,39,64,.5);padding:16px}
+  .fld{margin-bottom:14px}
+  .fld label{display:block;font-family:var(--mono);font-size:10px;letter-spacing:1.5px;color:var(--muted);text-transform:uppercase;margin-bottom:7px}
+  .pick{display:flex;gap:2px}
+  .pick button{flex:1;background:rgba(8,26,46,.7);border:1px solid var(--ink-2);color:var(--muted);font-family:var(--mono);font-size:12px;padding:9px;cursor:pointer;border-radius:2px}
+  .pick button.on{border-color:var(--cyan);color:var(--cyan);background:rgba(89,207,228,.08)}
+  input.txt{width:100%;background:rgba(8,26,46,.7);border:1px solid var(--ink-2);color:var(--paper);font-family:var(--mono);font-size:13px;padding:10px 12px;border-radius:2px}
+  input.txt:focus{outline:none;border-color:var(--cyan);box-shadow:0 0 0 3px rgba(89,207,228,.12)}
+  .resolved{font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:8px}
+  .resolved b{color:var(--cyan)}
+  .gate{margin-top:16px;border:1px dashed var(--amber);border-radius:2px;background:rgba(240,179,63,.06);padding:14px}
+  .gate .gh{font-family:var(--mono);font-size:11px;color:var(--amber);margin-bottom:10px;display:flex;gap:8px;align-items:center}
+  .gate label.chk{display:flex;gap:10px;align-items:flex-start;font-family:var(--mono);font-size:12px;color:var(--paper);cursor:pointer;margin-bottom:8px;line-height:1.5}
+  .gate input[type=checkbox]{margin-top:2px;accent-color:var(--amber);width:15px;height:15px}
+  .dispatch{width:100%;margin-top:6px;padding:12px;border-radius:2px;border:1px solid var(--ink-2);background:rgba(8,26,46,.7);color:var(--muted-2);
+    font-family:var(--disp);font-weight:600;letter-spacing:1px;cursor:not-allowed;font-size:14px}
+  .dispatch.go{color:var(--navy);background:var(--cyan);border-color:var(--cyan);cursor:pointer;box-shadow:0 0 18px rgba(89,207,228,.35)}
+  .dispatch.go.prod{background:var(--red);border-color:var(--red);box-shadow:0 0 18px rgba(255,111,116,.4)}
+
+  .events,.logs{font-family:var(--mono);font-size:12px}
+  .evt{display:grid;grid-template-columns:auto 1fr auto;gap:12px;padding:10px 0;border-bottom:1px solid var(--ink);align-items:baseline}
+  .evt:last-child{border-bottom:0}
+  .evt .m{width:8px;height:8px;border-radius:50%;position:relative;top:5px}
+  .evt .m.ok{background:var(--ok)}.evt .m.rd{background:var(--red)}.evt .m.am{background:var(--amber)}.evt .m.bl{background:var(--cyan)}
+  .evt .sha{color:var(--amber)} .evt .l2{color:var(--muted-2);font-size:11px;margin-top:3px} .evt .t{color:var(--muted-2);font-size:11px;white-space:nowrap}
+  .logrow{display:flex;gap:12px;padding:5px 0;border-bottom:1px solid rgba(29,74,114,.5)}
+  .logrow .ts{color:var(--muted-2)}.logrow .sv{color:var(--cyan)}.logrow.w .msg{color:var(--amber)}
+  .note{font-family:var(--mono);font-size:11px;color:var(--amber);border:1px dashed var(--cyan-dim);padding:9px 12px;border-radius:2px;margin-bottom:14px;display:inline-block}
+  h2.vh{font-family:var(--disp);font-weight:600;font-size:18px;margin:0 0 4px}
+  .vh-sub{font-family:var(--mono);font-size:11px;color:var(--muted-2);margin-bottom:16px}
+  @media(max-width:720px){header{flex-wrap:wrap}header .cell{flex:1 1 40%}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="cell title"><span class="lab">Deployment console</span><span class="val">deployctl</span></div>
+    <div class="cell"><span class="lab">Project · App</span><span class="val mono">skincair / sherwood</span></div>
+    <div class="cell"><span class="lab">Environment</span>
+      <div class="env-toggle" id="envToggle">
+        <button data-env="staging">STAGING</button>
+        <button data-env="production" class="on">PRODUCTION</button>
+      </div>
+    </div>
+    <div class="cell flex"></div>
+    <div class="cell"><span class="lab">Operator</span><span class="val mono">mrodsut</span></div>
+    <div class="cell"><span class="lab">Adapter</span><span class="val mono" style="color:var(--cyan)">aws</span></div>
+  </header>
+
+  <div class="tabs" id="tabs">
+    <button class="on" data-view="board">Board</button>
+    <button data-view="deploy">Deploy</button>
+    <button data-view="history">History</button>
+    <button data-view="logs">Logs</button>
+    <span class="df">ROLLBACK · LOGS — READ-ONLY / DEFERRED FROM v1</span>
+  </div>
+
+  <!-- BOARD -->
+  <section class="view on" data-view="board">
+    <div class="schematic">
+      <div class="sch-head">
+        <span>DEPLOY PATH · production/client3/backend — live</span>
+        <span class="legend">
+          <span><span class="dotc ok"></span>healthy</span>
+          <span><span class="dotc am"></span>in&nbsp;progress</span>
+          <span><span class="dotc rd"></span>fault</span>
+        </span>
+      </div>
+      <svg viewBox="0 0 1180 150" width="100%" role="img" aria-label="Two-hop deploy path schematic">
+        <!-- wires -->
+        <path class="wire live" d="M120 55 H250"/>
+        <path class="wire live" d="M370 55 H500"/>
+        <path class="wire live" d="M620 55 H750"/>
+        <path class="wire" d="M870 55 H1000"/>
+        <path class="wire" d="M500 95 V120 H620 V70"/>
+        <!-- nodes -->
+        <g>
+          <rect class="node hot" x="20" y="30" width="100" height="50" rx="3"/>
+          <text x="70" y="52" text-anchor="middle" font-size="12">deployctl</text>
+          <text class="lab" x="70" y="68" text-anchor="middle">HOP A</text>
+        </g>
+        <g>
+          <rect class="node hot" x="250" y="30" width="120" height="50" rx="3"/>
+          <text x="310" y="52" text-anchor="middle" font-size="12">SSM Run Cmd</text>
+          <text class="lab" x="310" y="68" text-anchor="middle">control plane</text>
+        </g>
+        <g>
+          <rect class="node hot" x="500" y="30" width="120" height="50" rx="3"/>
+          <text x="560" y="49" text-anchor="middle" font-size="11">ASG · 2 inst</text>
+          <text class="lab" x="560" y="64" text-anchor="middle">i-aaa111 i-bbb222</text>
+        </g>
+        <g>
+          <rect class="node" x="500" y="105" width="120" height="34" rx="3"/>
+          <text x="560" y="126" text-anchor="middle" font-size="10" fill="#7fa6c4">Secrets Mgr · HOP B</text>
+        </g>
+        <g>
+          <rect class="node hot" x="750" y="30" width="120" height="50" rx="3"/>
+          <text x="810" y="49" text-anchor="middle" font-size="11">release/e77c1b9</text>
+          <text class="lab" x="810" y="64" text-anchor="middle">→ current symlink</text>
+        </g>
+        <g>
+          <rect class="node" x="1000" y="30" width="150" height="50" rx="3"/>
+          <text x="1075" y="49" text-anchor="middle" font-size="11">pm2 · health</text>
+          <text class="lab" x="1075" y="64" text-anchor="middle">api + worker · /health</text>
+        </g>
+        <!-- travelling pulse -->
+        <circle class="pulse-dot" r="4"><animateMotion dur="3.2s" repeatCount="indefinite"
+          path="M70 55 H310 M310 55 H560 M560 55 H810 H1075"/></circle>
+      </svg>
+    </div>
+
+    <div class="grid-wrap">
+      <div class="matrix">
+        <div class="mh"><span>Tenant</span><span>Backend</span><span>Frontend</span></div>
+        <div id="matrixBody"></div>
+      </div>
+      <div class="inspector">
+        <div class="ih">Inspector · production/client1/backend</div>
+        <div class="ib">
+          <div class="row"><span class="k">current</span><span>v2.14.0 · a1b2c3d</span></div>
+          <div class="row"><span class="k">resolvedCommit</span><span>a1b2c3d9f4e…</span></div>
+          <div class="row"><span class="k">health</span><span class="badge ok">200 OK · 41ms</span></div>
+          <div class="row"><span class="k">guardrail</span><span class="badge ok">clear</span></div>
+          <div class="row"><span class="k">deployedBy</span><span>mrodsut</span></div>
+          <div class="row"><span class="k">instances</span><span>i-aaa111, i-bbb222</span></div>
+          <div class="row"><span class="k">pm2</span><span>sherwood-api-client1</span></div>
+          <div class="row"><span class="k">frontendBucket</span><span style="color:var(--muted)">…-frontend-client1</span></div>
+        </div>
+        <div class="ih" style="border-top:1px solid var(--ink)">Recent · this target</div>
+        <div class="ib events">
+          <div class="evt"><span class="m ok"></span><div><div>deploy success → <span class="sha">a1b2c3d</span></div><div class="l2">tag v2.14.0 · 2 inst · 3m12s</div></div><span class="t">2h</span></div>
+          <div class="evt"><span class="m bl"></span><div><div>rollback → <span class="sha">9f4e2a1</span></div><div class="l2">from bd41902 · health regressed</div></div><span class="t">4d</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- DEPLOY -->
+  <section class="view" data-view="deploy">
+    <h2 class="vh">Dispatch a deploy</h2>
+    <div class="vh-sub">deployctl deploy &lt;app&gt; --tenant &lt;t&gt; --env production --ref &lt;ref&gt;</div>
+    <div class="grid-wrap">
+      <div class="deploybox">
+        <div class="fld"><label>App</label>
+          <div class="pick" data-pick="app"><button class="on">backend</button><button>frontend</button></div>
+        </div>
+        <div class="fld"><label>Tenant</label>
+          <div class="pick" data-pick="tenant"><button class="on">client1</button><button>client2</button><button>client3</button></div>
+        </div>
+        <div class="fld"><label>Ref — production: tag or full SHA only</label>
+          <input class="txt" id="ref" value="v2.14.0" spellcheck="false">
+          <div class="resolved">→ resolves to <b>a1b2c3d9f4e2a1…</b> · kind <b>tag</b> · advertised by origin</div>
+        </div>
+
+        <div class="gate" id="gate">
+          <div class="gh"><span class="dotc am"></span> PRODUCTION SAFETY GATE — client1 · backend</div>
+          <label class="chk"><input type="checkbox" class="g"> I confirm restarting <b>sherwood-api-client1</b> + worker across <b>2 ASG instances</b></label>
+          <label class="chk"><input type="checkbox" class="g"> Ref is immutable (tag/SHA), not a moving branch</label>
+          <label class="chk"><input type="checkbox" class="g"> No guardrail is currently held for this target</label>
+          <button class="dispatch prod" id="dispatch">Complete safety gate to dispatch</button>
+        </div>
+      </div>
+
+      <div class="inspector">
+        <div class="ih">What will happen</div>
+        <div class="ib events">
+          <div class="evt"><span class="m bl"></span><div><div>1 · set guardrail</div><div class="l2">current.json.inProgress · production/client1/backend</div></div><span class="t"></span></div>
+          <div class="evt"><span class="m bl"></span><div><div>2 · SSM Run Command</div><div class="l2">prepare release e77c1b9 on i-aaa111, i-bbb222</div></div><span class="t"></span></div>
+          <div class="evt"><span class="m bl"></span><div><div>3 · repoint symlink + pm2 restart</div><div class="l2">tenant current → release · api + worker</div></div><span class="t"></span></div>
+          <div class="evt"><span class="m ok"></span><div><div>4 · health check + record</div><div class="l2">GET /health · append event · clear guardrail</div></div><span class="t"></span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- HISTORY -->
+  <section class="view" data-view="history">
+    <h2 class="vh">Deploy history</h2><div class="vh-sub">append-only · S3 · production · newest first</div>
+    <div class="matrix"><div class="ib events" id="histBody" style="padding:6px 16px"></div></div>
+  </section>
+
+  <!-- LOGS -->
+  <section class="view" data-view="logs">
+    <h2 class="vh">Logs</h2><div class="vh-sub">CloudWatch · /skincair/production/api · tenant client1 · since 1h</div>
+    <div class="note">read-only mirror of deployctl logs — no deploy actions here</div>
+    <div class="matrix"><div class="ib logs" id="logBody" style="padding:8px 16px"></div></div>
+  </section>
+</div>
+
+<script>
+  const T={client1:{n:'Meridian Dermatology'},client2:{n:'Cedar Skin Institute'},client3:{n:'Northlake Clinics'}};
+  const BOARD={
+    production:[
+      {t:'client1', be:{s:'ok',v:'v2.14.0',x:'a1b2c3d',sub:'200 OK · 2h · mrodsut'}, fe:{s:'ok',v:'v2.14.0',x:'a1b2c3d',sub:'synced · 2h'}},
+      {t:'client2', be:{s:'ok',v:'v2.13.2',x:'9f4e2a1',sub:'200 OK · 1d · ci'}, fe:{s:'ok',v:'v2.13.2',x:'9f4e2a1',sub:'synced · 1d'}},
+      {t:'client3', be:{s:'am',v:'deploying',x:'e77c1b9',sub:'guardrail held · 00:34'}, fe:{s:'am',v:'v2.12.0',x:'7a9d0e4',sub:'behind prod · stale'}},
+    ],
+    staging:[
+      {t:'client1', be:{s:'ok',v:'feat/scheduling',x:'bd41902',sub:'200 OK · 20m'}, fe:{s:'ok',v:'feat/scheduling',x:'bd41902',sub:'synced · 20m'}},
+      {t:'client2', be:{s:'rd',v:'feat/import',x:'c1902ab',sub:'503 · api down · 6m'}, fe:{s:'ok',v:'feat/import',x:'c1902ab',sub:'synced · 6m'}},
+      {t:'client3', be:{s:'off',v:'not deployed',x:'—',sub:'no current.json'}, fe:{s:'off',v:'not deployed',x:'—',sub:'no current.json'}},
+    ]
+  };
+  const HIST=[
+    {m:'am',l1:'deploy in progress → <span class="sha">e77c1b9</span>',l2:'production/client3/backend · guardrail held', t:'00:34'},
+    {m:'ok',l1:'deploy success → <span class="sha">a1b2c3d</span>',l2:'production/client1/backend · v2.14.0 · i-aaa111,i-bbb222 · 3m12s', t:'2h'},
+    {m:'ok',l1:'deploy success → <span class="sha">a1b2c3d</span>',l2:'production/client1/frontend · frontend/a1b2c3d/production/client1', t:'2h'},
+    {m:'bl',l1:'rollback → <span class="sha">9f4e2a1</span>',l2:'production/client1/backend · from bd41902', t:'4d'},
+    {m:'rd',l1:'deploy partial_failure → <span class="sha">bd41902</span>',l2:'i-bbb222 npm ci failed · i-aaa111 ok', t:'4d'},
+    {m:'ok',l1:'deploy success → <span class="sha">3c0ff21</span>',l2:'production/client2/backend · v2.13.0', t:'6d'},
+  ];
+  const LOG=[
+    {ts:'09:14:02Z',sv:'api',msg:'listening :8080 (sherwood-api-client1) release a1b2c3d'},
+    {ts:'09:14:03Z',sv:'api',msg:'health check passed — GET /health 200 41ms'},
+    {ts:'09:22:41Z',sv:'api',msg:'POST /v1/appointments 201 tenant=client1 88ms'},
+    {ts:'09:31:10Z',sv:'api',w:true,msg:'redis pool 82% — skincair/production/redis'},
+    {ts:'09:47:55Z',sv:'api',msg:'GET /v1/patients?page=2 200 tenant=client1 63ms'},
+  ];
+  let ENV='production';
+
+  function cell(app,d){
+    return `<div class="cellapp">
+      <div class="ver"><span class="stat ${d.s}"></span>${d.v} ${d.x!=='—'?'<span style="color:#7fa6c4">· '+d.x+'</span>':''}</div>
+      <div class="sub">${d.sub}</div></div>`;
+  }
+  function board(){
+    document.getElementById('matrixBody').innerHTML = BOARD[ENV].map(r=>`
+      <div class="mrow">
+        <div class="tn"><b>${T[r.t].n}</b><small>${r.t}</small></div>
+        ${cell('backend',r.be)}
+        ${cell('frontend',r.fe)}
+      </div>`).join('');
+  }
+  document.getElementById('histBody').innerHTML = HIST.map(e=>`
+    <div class="evt"><span class="m ${e.m}"></span><div><div>${e.l1}</div><div class="l2">${e.l2}</div></div><span class="t">${e.t}</span></div>`).join('');
+  document.getElementById('logBody').innerHTML = LOG.map(l=>`
+    <div class="logrow ${l.w?'w':''}"><span class="ts">${l.ts}</span><span class="sv">${l.sv}</span><span class="msg">${l.msg}</span></div>`).join('');
+
+  document.getElementById('envToggle').addEventListener('click',e=>{
+    const b=e.target.closest('button'); if(!b)return; ENV=b.dataset.env;
+    [...e.currentTarget.children].forEach(x=>x.classList.toggle('on',x===b));
+    board();
+  });
+  document.getElementById('tabs').addEventListener('click',e=>{
+    const b=e.target.closest('button'); if(!b)return; const v=b.dataset.view;
+    [...document.querySelectorAll('#tabs button')].forEach(x=>x.classList.toggle('on',x===b));
+    document.querySelectorAll('.view').forEach(s=>s.classList.toggle('on',s.dataset.view===v));
+  });
+  document.querySelectorAll('.pick').forEach(p=>p.addEventListener('click',e=>{
+    const b=e.target.closest('button'); if(!b)return;
+    [...p.children].forEach(x=>x.classList.toggle('on',x===b));
+  }));
+
+  // safety gate
+  const gate=document.getElementById('gate'), dispatch=document.getElementById('dispatch');
+  gate.addEventListener('change',()=>{
+    const all=[...gate.querySelectorAll('input.g')].every(c=>c.checked);
+    dispatch.classList.toggle('go',all);
+    dispatch.textContent = all?'Dispatch deploy → production':'Complete safety gate to dispatch';
+  });
+  dispatch.addEventListener('click',()=>{
+    if(!dispatch.classList.contains('go'))return;
+    dispatch.textContent='✓ Guardrail set · SSM command dispatched';
+    dispatch.style.filter='saturate(1.3)';
+  });
+  board();
+</script>
+</body>
+</html>
