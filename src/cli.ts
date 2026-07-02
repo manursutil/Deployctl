@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 import { DockerSimSsmDeployExecutor } from "./adapters/docker-ssm.js";
+import { FixtureFrontendBuilder, NoopFrontendSmokeCheck } from "./adapters/fixture-frontend.js";
 import { FileSystemDeployHistoryRepository } from "./adapters/filesystem-history.js";
+import { FileSystemFrontendArtifactStore, FileSystemFrontendSync } from "./adapters/filesystem-frontend.js";
 import { GitCliRefResolver } from "./adapters/git.js";
 import { loadDeployctlConfig } from "./core/config.js";
 import { deployBackend } from "./core/deploy.js";
 import { formatTenantStatus, getTenantStatus } from "./core/diagnostics.js";
+import { deployFrontend } from "./core/frontend.js";
+import { rollbackBackend, rollbackFrontend } from "./core/rollback.js";
 import { getTenantConfig, listTenants, loadTenantRegistry } from "./core/tenants.js";
 import { DeployctlError, formatError, type Io } from "./shared.js";
 
@@ -180,7 +184,7 @@ async function runDeployFrontend(args: string[], io: Io): Promise<number> {
   const environment = requiredOption(args, "--env");
   const requestedRef = requiredOption(args, "--ref");
 
-  await loadDeployctlConfig(optionValue(args, "--config") ?? "deployctl.config.yml");
+  const config = await loadDeployctlConfig(optionValue(args, "--config") ?? "deployctl.config.yml");
   const registry = await loadTenantRegistry(optionValue(args, "--tenants") ?? "tenants.yml");
 
   // Validate the tenant/env (and that it has a frontend bucket/URL) offline
@@ -188,6 +192,43 @@ async function runDeployFrontend(args: string[], io: Io): Promise<number> {
   getTenantConfig(registry, environment, tenant);
 
   io.stdout.write(`Validated frontend deploy for ${environment}/${tenant} (ref ${requestedRef}).\n`);
+
+  // Sim Phase 3 (docs/phase-0-simulation-plan.md): adapterMode: sim builds through
+  // the fixture builder and syncs via the filesystem adapters instead of the
+  // pending S3/build adapters, using the same deployFrontend orchestration.
+  if (config.adapterMode === "sim") {
+    // Build-variable source is a Sim Phase 3 simulation assumption, not a
+    // confirmed Phase 0 answer (docs/phase-0-checklist.md): derived directly
+    // from --tenant/--env to match deployctl.sim.config.yml's identity inputs.
+    const buildVariables = { VITE_TENANT: tenant, VITE_ENVIRONMENT: environment };
+
+    const result = await deployFrontend({
+      env: environment,
+      tenant,
+      requestedRef,
+      actor: "cli",
+      buildVariables,
+      config,
+      registry,
+      refResolver: new GitCliRefResolver(),
+      history: new FileSystemDeployHistoryRepository(process.env.DEPLOYCTL_SIM_ROOT),
+      artifacts: new FileSystemFrontendArtifactStore(process.env.DEPLOYCTL_SIM_ROOT),
+      builder: new FixtureFrontendBuilder(),
+      sync: new FileSystemFrontendSync(process.env.DEPLOYCTL_SIM_ROOT),
+      smokeCheck: new NoopFrontendSmokeCheck(),
+    });
+
+    if (result.status !== "success") {
+      throw new DeployctlError(
+        `Frontend deploy ${result.status} for ${environment}/${tenant} (commit ${result.event.resolvedCommit}).`,
+      );
+    }
+
+    io.stdout.write(
+      `Frontend deploy succeeded for ${environment}/${tenant} (commit ${result.event.resolvedCommit}, ${result.reused ? "reused" : "built"} artifact).\n`,
+    );
+    return 0;
+  }
 
   // The orchestration module (deployFrontend) is implemented and unit-tested
   // behind the artifact-store, builder, sync, and smoke-check seams, but the
@@ -217,6 +258,34 @@ async function runRollbackBackend(args: string[], io: Io): Promise<number> {
   const target = toVersion === undefined ? "the previous version" : toVersion;
   io.stdout.write(`Validated backend rollback for ${environment}/${tenant} (to ${target}).\n`);
 
+  // Sim Phase 3 (docs/phase-0-simulation-plan.md): reuses the Sim Phase 2 backend
+  // adapters as-is — rollbackBackend uses the same SsmDeployExecutor/history seams
+  // as deployBackend, so no new adapters are needed for this mode.
+  if (config.adapterMode === "sim") {
+    const result = await rollbackBackend({
+      env: environment,
+      tenant,
+      actor: "cli",
+      toVersion,
+      config,
+      registry,
+      history: new FileSystemDeployHistoryRepository(process.env.DEPLOYCTL_SIM_ROOT),
+      executor: new DockerSimSsmDeployExecutor({
+        releaseRoot: config.backendDeploy.releaseRoot,
+        osUser: config.backendDeploy.osUser,
+      }),
+    });
+
+    if (result.status !== "success") {
+      throw new DeployctlError(
+        `Backend rollback ${result.status} for ${environment}/${tenant} (to ${result.event.targetVersion}).`,
+      );
+    }
+
+    io.stdout.write(`Backend rollback succeeded for ${environment}/${tenant} (now at ${result.event.targetVersion}).\n`);
+    return 0;
+  }
+
   // The orchestration module (rollbackBackend) is implemented and unit-tested
   // behind the SsmDeployExecutor seam, but the production SSM executor and the
   // S3-backed deploy history adapter (which supplies the version to restore) are
@@ -231,6 +300,7 @@ async function runRollbackFrontend(args: string[], io: Io): Promise<number> {
   const environment = requiredOption(args, "--env");
   const toVersion = optionValue(args, "--version");
 
+  const config = await loadDeployctlConfig(optionValue(args, "--config") ?? "deployctl.config.yml");
   const registry = await loadTenantRegistry(optionValue(args, "--tenants") ?? "tenants.yml");
 
   // Validate the tenant/env offline before reporting the pending boundary.
@@ -238,6 +308,31 @@ async function runRollbackFrontend(args: string[], io: Io): Promise<number> {
 
   const target = toVersion === undefined ? "the previous version" : toVersion;
   io.stdout.write(`Validated frontend rollback for ${environment}/${tenant} (to ${target}).\n`);
+
+  // Sim Phase 3 (docs/phase-0-simulation-plan.md): re-syncs the exact recorded
+  // artifact via the filesystem sync adapter. rollbackFrontend has no builder seam
+  // at all, so "never rebuilds on rollback" is structural, not just a convention.
+  if (config.adapterMode === "sim") {
+    const result = await rollbackFrontend({
+      env: environment,
+      tenant,
+      actor: "cli",
+      toVersion,
+      registry,
+      history: new FileSystemDeployHistoryRepository(process.env.DEPLOYCTL_SIM_ROOT),
+      sync: new FileSystemFrontendSync(process.env.DEPLOYCTL_SIM_ROOT),
+      smokeCheck: new NoopFrontendSmokeCheck(),
+    });
+
+    if (result.status !== "success") {
+      throw new DeployctlError(
+        `Frontend rollback ${result.status} for ${environment}/${tenant} (to ${result.event.targetVersion}).`,
+      );
+    }
+
+    io.stdout.write(`Frontend rollback succeeded for ${environment}/${tenant} (now at ${result.event.targetVersion}).\n`);
+    return 0;
+  }
 
   // The orchestration module (rollbackFrontend) is implemented and unit-tested
   // behind the frontend sync/smoke-check seams, but the production S3 sync adapter
