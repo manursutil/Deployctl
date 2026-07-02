@@ -296,6 +296,7 @@ Current paths:
 - `tenants.yml`: tenant registry with environment/tenant resource mappings. Current values are starter references and should be confirmed before real deploy use.
 - `tenants.sim.yml`: tenant registry for the Docker demo lane.
 - `docs/phase-0-simulation-plan.md`: plan for a local Docker Compose lab using simulated adapters behind the same core seams.
+- `docs/simulation-runbook.md`: operator runbook for the Docker demo lab (staging walkthrough + production replacement demo, reset instructions, secret-safety note).
 - `docs/phase-0-real-cutover.md`: replacement checklist for moving from simulation to real AWS adapters and confirmed Phase 0 values.
 
 Proposed paths from the architecture, not yet created (see the target repo structure in `docs/implementation-plan.md`):
@@ -372,7 +373,7 @@ Repository gaps:
 - No Bitbucket pipeline config exists yet.
 - No deploy history schemas exist yet.
 - No IAM policies exist yet.
-- Sim Phase 1 (local persistence: `adapterMode`, `FileSystemDeployHistoryRepository` wired into `status`), Sim Phase 2 (backend container: `docker-compose.sim.yml`, `scripts/ec2/deploy-backend.sh`, `DockerSimSsmDeployExecutor` wired into `deploy backend`), Sim Phase 3 (frontend artifacts + rollback: `FileSystemFrontendArtifactStore`/`FileSystemFrontendSync`, `FixtureFrontendBuilder`, `deploy frontend` and both `rollback` controllers wired for sim), Sim Phase 4 (logs: `LogQuery` core seam, `FileSystemLogQuery`, `deployctl logs` controller, container-written log fixtures), and Sim Phase 5 (production replacement demo: two-container `production` compose profile, `reconcileBackend` core + `deployctl reconcile backend`) are implemented. Only the Sim Phase 6 operator runbook remains — see `docs/phase-0-simulation-plan.md`. Both the Sim Phase 2 backend release directory and the Sim Phase 3 frontend artifact are synthesized markers, not real builds (no fixture app repo/checkout yet). The Sim Phase 5 `reconcile` simulates the Phase 10 mechanism; real ASG reconciliation stays Phase-0-blocked.
+- Sim Phase 1 (local persistence: `adapterMode`, `FileSystemDeployHistoryRepository` wired into `status`), Sim Phase 2 (backend container: `docker-compose.sim.yml`, `scripts/ec2/deploy-backend.sh`, `DockerSimSsmDeployExecutor` wired into `deploy backend`), Sim Phase 3 (frontend artifacts + rollback: `FileSystemFrontendArtifactStore`/`FileSystemFrontendSync`, `FixtureFrontendBuilder`, `deploy frontend` and both `rollback` controllers wired for sim), Sim Phase 4 (logs: `LogQuery` core seam, `FileSystemLogQuery`, `deployctl logs` controller, container-written log fixtures), Sim Phase 5 (production replacement demo: two-container `production` compose profile, `reconcileBackend` core + `deployctl reconcile backend`), and Sim Phase 6 (operator runbook, `docs/simulation-runbook.md`) are implemented. The simulation lane (Sim Phases 1–6) is complete. Both the Sim Phase 2 backend release directory and the Sim Phase 3 frontend artifact are synthesized markers, not real builds (no fixture app repo/checkout yet). The Sim Phase 5 `reconcile` simulates the Phase 10 mechanism; real ASG reconciliation stays Phase-0-blocked.
 
 Architecture and implementation open questions (tracked as a working checklist in `docs/phase-0-checklist.md`, grouped by the AWS adapter each answer unblocks):
 
