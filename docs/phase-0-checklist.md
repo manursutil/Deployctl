@@ -151,7 +151,7 @@ Unblocks: the real CloudWatch adapter behind the `LogQuery` seam (`src/core/logs
 
 ## E. Production ASG bootstrap — Phase 10
 
-Unblocks: Phase 10 (`reconcile`), currently `Blocked`.
+Unblocks: Phase 10 (`reconcile`), currently `Blocked`. The reconcile mechanism itself (`reconcileBackend` core + `deployctl reconcile backend`) exists and is demonstrated in the Docker lab (Sim Phase 5); what these answers unblock is resolving real healthy ASG instances and confirming real bootstrap behavior.
 
 ### E1. Replacement instance behavior
 - [ ] Confirm whether a replacement production ASG instance restores tenant backend state automatically (user data / bootstrap) or comes up empty.
@@ -161,6 +161,8 @@ Unblocks: Phase 10 (`reconcile`), currently `Blocked`.
 > _Answer:_
 >
 > **Record in:** CONTEXT, `docs/initial-architecture-proposal.md`, plan (Phase 10)
+>
+> _Simulation answer (not confirmed real infra):_ Sim Phase 5 models a replacement instance as a production container recreated with an empty `/opt/sherwood` volume; it comes up without the current release, and `deployctl reconcile backend` restores it by reading the desired version from `current.json` and re-preparing that release. This proves the recovery path shape; it does not confirm whether real ASG instances self-restore or how they learn the desired version.
 
 ---
 
