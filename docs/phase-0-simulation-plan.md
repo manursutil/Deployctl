@@ -257,10 +257,19 @@ Completed: `docker-compose.sim.yml` + `docker/sim/app-server/` build one staging
 
 ### Sim Phase 3: Frontend Artifacts
 
-- Add filesystem artifact store and sync adapters behind the frontend seams.
-- Add fixture frontend build behind the `FrontendBuilder` seam.
-- Add the `deployctl rollback backend|frontend` CLI controllers — they do not exist yet (Phase 8 lists them as pending) and are not dispatched in `src/cli.ts`. The `rollback` demo step depends on this.
-- Wire frontend deploy and both rollback controllers to the simulated adapters (replaces the pending-throw when `adapterMode: sim`).
+Status: `Done`
+
+- [x] Add filesystem artifact store and sync adapters behind the frontend seams.
+- [x] Add fixture frontend build behind the `FrontendBuilder` seam.
+- [x] Wire frontend deploy and both rollback controllers to the simulated adapters (replaces the pending-throw when `adapterMode: sim`).
+
+Correction: an earlier draft of this phase said the `deployctl rollback backend|frontend` CLI controllers "do not exist yet ... not dispatched in `src/cli.ts`." That was stale — they were added with real (pending-throw) implementations in Phase 8 and are dispatched (`runRollbackBackend`/`runRollbackFrontend`); this phase only added their `adapterMode: sim` wiring.
+
+Completed: `src/adapters/filesystem-frontend.ts` provides `FileSystemFrontendArtifactStore` (stores artifacts under `<rootDir>/artifacts/<storageKey>`, where `storageKey` already carries commit + env + tenant + build-config fingerprint) and `FileSystemFrontendSync` (copies the stored artifact to `<rootDir>/frontend-buckets/<bucket>/index.html`). `src/adapters/fixture-frontend.ts` provides `FixtureFrontendBuilder` (no real git checkout/npm build — synthesizes an `index.html` embedding the commit, env, tenant, and exact build variables, so identity-sensitive builds are visible, not just an opaque hash) and `NoopFrontendSmokeCheck`. `deployctl deploy frontend --config deployctl.sim.config.yml` runs the existing `deployFrontend` orchestration through these plus `GitCliRefResolver` and `FileSystemDeployHistoryRepository`, synthesizing `buildVariables` `{ VITE_TENANT, VITE_ENVIRONMENT }` (a simulation assumption; the real per-tenant/env build-variable source is a Phase 0 confirmation). `rollback backend` reuses the Sim Phase 2 executor unchanged; `rollback frontend` re-syncs the exact recorded artifact via `FileSystemFrontendSync` with no builder in scope, so it structurally cannot rebuild.
+
+Path deviation from this plan's earlier suggestion (`.deployctl-sim/frontend-buckets/<env>/<tenant>`): the `FrontendSync` seam only receives the tenant's bucket name, so the adapter keys the bucket directory by `tenant.frontendBucket` instead of env/tenant, avoiding a core seam-signature change for no functional gain.
+
+Covered by `test/filesystem-frontend.test.ts`, `test/fixture-frontend.test.ts`, and sim-mode CLI tests in `test/cli.test.ts` (first deploy builds, repeat reuses, a changed build variable produces a different key, rollback re-syncs the earlier artifact). `rollback backend` in sim mode shells out to Docker, so per the Sim Phase 2 precedent it is verified manually against the running container, not via an automated docker-dependent test.
 
 ### Sim Phase 4: Logs And Diagnostics
 

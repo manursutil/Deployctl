@@ -43,6 +43,8 @@ Current files:
 - `src/adapters/git.ts`: Git CLI adapter for resolving refs from the application repository.
 - `src/adapters/filesystem-history.ts`: `FileSystemDeployHistoryRepository`, a filesystem-backed `DeployHistoryRepository` for the Sim Phase 1 simulation lane (docs/phase-0-simulation-plan.md), storing events/current state under `.deployctl-sim/history/deploys/<env>/<tenant>/<app>/`.
 - `src/adapters/docker-ssm.ts`: `DockerSimSsmDeployExecutor`, the Sim Phase 2 `SsmDeployExecutor` that runs `scripts/ec2/deploy-backend.sh` in the Docker app-server container via `docker exec`, reusing `ssmTargets.<env>.instanceIds` entries as container names.
+- `src/adapters/filesystem-frontend.ts`: Sim Phase 3 `FileSystemFrontendArtifactStore` (stores artifacts under `.deployctl-sim/artifacts/<storageKey>`) and `FileSystemFrontendSync` (copies to `.deployctl-sim/frontend-buckets/<bucket>/index.html`).
+- `src/adapters/fixture-frontend.ts`: Sim Phase 3 `FixtureFrontendBuilder` (synthesizes an `index.html` embedding commit/env/tenant/build variables, no real build) and `NoopFrontendSmokeCheck` (always healthy; no HTTP server stood up in the sim).
 - `src/shared.ts`: shared CLI errors, IO, and formatting helpers.
 - `tenants.yml`: initial tenant registry with resource references only.
 - `deployctl.sim.config.yml`: simulation config (`adapterMode: sim`) for the Docker-based demo lane; values are simulation fixtures, not confirmed Phase 0 facts.
@@ -263,6 +265,8 @@ Current paths:
 - `src/adapters/git.ts`: Git CLI ref resolver adapter.
 - `src/adapters/filesystem-history.ts`: filesystem-backed `DeployHistoryRepository` adapter used when `adapterMode: sim`.
 - `src/adapters/docker-ssm.ts`: `SsmDeployExecutor` adapter used when `adapterMode: sim`; runs `scripts/ec2/deploy-backend.sh` via `docker exec`.
+- `src/adapters/filesystem-frontend.ts`: `FrontendArtifactStore`/`FrontendSync` adapters used when `adapterMode: sim`.
+- `src/adapters/fixture-frontend.ts`: `FrontendBuilder`/`FrontendSmokeCheck` adapters used when `adapterMode: sim`.
 - `scripts/ec2/deploy-backend.sh`: EC2-local backend deploy script (real SSM target or the sim container).
 - `docker-compose.sim.yml`, `docker/sim/app-server/`: Sim Phase 2 Docker "EC2 app-server" lab.
 - `src/shared.ts`: shared errors and IO formatting.
@@ -270,6 +274,8 @@ Current paths:
 - `test/config.test.ts`: config loading and validation behavior tests.
 - `test/filesystem-history.test.ts`: `FileSystemDeployHistoryRepository` behavior tests (append-only events, current state, `inProgress` guardrail).
 - `test/docker-ssm.test.ts`: `DockerSimSsmDeployExecutor` behavior tests (env vars passed to the container, per-instance success/failure, `asg` rejection) with a mocked `docker` runner.
+- `test/filesystem-frontend.test.ts`: frontend artifact store/sync + `deployFrontend`/`rollbackFrontend` integration behavior (build/reuse/changed-variable/rollback-resync).
+- `test/fixture-frontend.test.ts`: `FixtureFrontendBuilder` content/identity and `NoopFrontendSmokeCheck` behavior.
 - `test/tenants.test.ts`: tenant registry validation behavior tests.
 - `test/refs.test.ts`: ref resolution policy behavior tests.
 - `test/history.test.ts`: deploy history/current-state behavior tests.
@@ -316,12 +322,14 @@ node --import tsx src/cli.ts cleanup artifacts --env staging --dry-run
 node --import tsx src/cli.ts status --tenant client1 --env staging --config deployctl.sim.config.yml
 docker compose -f docker-compose.sim.yml up -d --build
 node --import tsx src/cli.ts deploy backend --tenant client1 --env staging --ref main --config deployctl.sim.config.yml --tenants tenants.sim.yml
+node --import tsx src/cli.ts deploy frontend --tenant client1 --env staging --ref main --config deployctl.sim.config.yml --tenants tenants.sim.yml
+node --import tsx src/cli.ts rollback frontend --tenant client1 --env staging --config deployctl.sim.config.yml --tenants tenants.sim.yml
 docker compose -f docker-compose.sim.yml down -v
 ```
 
-The `deploy frontend`, `rollback`, and `cleanup` commands currently validate inputs offline and then fail clearly that the work is still pending; they make no AWS or network calls until the S3/build adapters land. They validate tenant/env existence (and, for backend rollback, a configured SSM target selector); `rollback --version` is optional (omit to target the previous version); cleanup validates the environment against the tenant registry and defaults to dry-run.
+The `cleanup` commands (and, under the default `aws` mode, all deploy/rollback commands) validate inputs offline and then fail clearly that the work is still pending; they make no AWS or network calls until the S3/build adapters land. They validate tenant/env existence (and, for backend deploy/rollback, a configured SSM target selector); `rollback --version` is optional (omit to target the previous version); cleanup validates the environment against the tenant registry and defaults to dry-run.
 
-`status` and `deploy backend` behave the same pending way under the default `aws` adapter mode. With `--config deployctl.sim.config.yml` (`adapterMode: sim`): `status` reads real current-state records from `FileSystemDeployHistoryRepository` under `.deployctl-sim/` (Sim Phase 1); `deploy backend` runs the existing `deployBackend` orchestration for real against the `docker-compose.sim.yml` app-server container via `DockerSimSsmDeployExecutor` (Sim Phase 2, `docker exec`-ing `scripts/ec2/deploy-backend.sh`), resolving `--ref` through `GitCliRefResolver` pointed at this repo. No other command reads/writes simulation state yet. `DEPLOYCTL_SIM_ROOT` overrides the `.deployctl-sim` root, mainly for test isolation.
+With `--config deployctl.sim.config.yml` (`adapterMode: sim`), the deploy/rollback/status commands run for real against the simulation instead of throwing the pending error: `status` reads current-state records from `FileSystemDeployHistoryRepository` under `.deployctl-sim/` (Sim Phase 1); `deploy backend`/`rollback backend` run the existing orchestration against the `docker-compose.sim.yml` app-server container via `DockerSimSsmDeployExecutor` (Sim Phase 2); `deploy frontend`/`rollback frontend` run through the filesystem artifact store/sync, `FixtureFrontendBuilder`, and `NoopFrontendSmokeCheck` (Sim Phase 3), resolving `--ref` through `GitCliRefResolver` pointed at this repo. `cleanup` and `logs` are not wired for sim yet. `DEPLOYCTL_SIM_ROOT` overrides the `.deployctl-sim` root, mainly for test isolation.
 
 Proposed operator commands from the architecture:
 
@@ -349,7 +357,7 @@ Repository gaps:
 - No Bitbucket pipeline config exists yet.
 - No deploy history schemas exist yet.
 - No IAM policies exist yet.
-- Sim Phase 1 (local persistence: `adapterMode`, `FileSystemDeployHistoryRepository` wired into `status`) and Sim Phase 2 (backend container: `docker-compose.sim.yml`, `scripts/ec2/deploy-backend.sh`, `DockerSimSsmDeployExecutor` wired into `deploy backend`) are implemented. No frontend artifact adapters, logs adapter, or production/multi-instance simulation exist yet — see `docs/phase-0-simulation-plan.md` for the remaining Sim Phases. The Sim Phase 2 release directory is a metadata marker, not a real build (no fixture app repo/checkout yet).
+- Sim Phase 1 (local persistence: `adapterMode`, `FileSystemDeployHistoryRepository` wired into `status`), Sim Phase 2 (backend container: `docker-compose.sim.yml`, `scripts/ec2/deploy-backend.sh`, `DockerSimSsmDeployExecutor` wired into `deploy backend`), and Sim Phase 3 (frontend artifacts + rollback: `FileSystemFrontendArtifactStore`/`FileSystemFrontendSync`, `FixtureFrontendBuilder`, `deploy frontend` and both `rollback` controllers wired for sim) are implemented. No logs adapter or production/multi-instance simulation exist yet — see `docs/phase-0-simulation-plan.md` for the remaining Sim Phases. Both the Sim Phase 2 backend release directory and the Sim Phase 3 frontend artifact are synthesized markers, not real builds (no fixture app repo/checkout yet).
 
 Architecture and implementation open questions (tracked as a working checklist in `docs/phase-0-checklist.md`, grouped by the AWS adapter each answer unblocks):
 
