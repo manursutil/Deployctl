@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>deployctl · Operations Ledger</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#eef1f4; --surface:#ffffff; --surface-2:#f6f8fa; --rule:#dbe1e8; --rule-2:#c4ccd6;
+    --ink:#17202c; --ink-2:#3c4756; --muted:#5c6675; --muted-2:#8a94a1;
+    --teal:#0f7d88; --teal-dim:#e2f1f2; --teal-line:#8fcbd1;
+    --oxblood:#9c2b3a; --oxblood-dim:#f7e6e8; --oxblood-line:#e0a9b0;
+    --amber:#a9761b; --amber-dim:#f6edda; --green:#2f7d55; --green-dim:#e2f0e8;
+    --disp:'Archivo',sans-serif; --mono:'IBM Plex Mono',monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--disp);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .mono{font-family:var(--mono)}
+
+  .wrap{max-width:1240px;margin:0 auto;padding:0 24px 48px}
+  /* masthead */
+  header{display:flex;align-items:flex-end;gap:20px;padding:26px 0 16px;border-bottom:2px solid var(--ink)}
+  .logo{display:flex;flex-direction:column;gap:2px}
+  .logo .name{font-family:var(--disp);font-weight:700;font-size:26px;letter-spacing:-.5px;line-height:1}
+  .logo .name .k{color:var(--teal)}
+  .logo .tag{font-family:var(--mono);font-size:11px;color:var(--muted);letter-spacing:1px}
+  .header-meta{margin-left:auto;display:flex;gap:26px;align-items:flex-end}
+  .hm{display:flex;flex-direction:column;gap:3px;text-align:right}
+  .hm .l{font-family:var(--mono);font-size:10px;letter-spacing:1.5px;color:var(--muted-2);text-transform:uppercase}
+  .hm .v{font-family:var(--mono);font-size:13px;font-weight:500}
+  /* persistent ambient env cue at the very top of the page */
+  .envbar{position:fixed;top:0;left:0;right:0;height:5px;z-index:60;background:var(--oxblood);transition:background .2s}
+  body.stg .envbar{background:var(--green)}
+
+  /* env control — the loudest control on the page */
+  .env-control{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+  .env-label{font-family:var(--mono);font-size:10px;letter-spacing:1.5px;color:var(--muted-2);text-transform:uppercase}
+  .env-switch{display:inline-flex;border:1px solid var(--rule-2);border-radius:10px;overflow:hidden;background:var(--surface);box-shadow:0 1px 2px rgba(23,32,44,.06)}
+  .env-switch button{display:inline-flex;align-items:center;gap:9px;background:var(--surface);border:0;font-family:var(--disp);font-weight:600;
+    font-size:14px;padding:10px 22px;cursor:pointer;color:var(--muted);transition:background .15s,color .15s}
+  .env-switch button .es-dot{width:9px;height:9px;border-radius:50%;background:var(--rule-2);transition:.15s}
+  .env-switch button:hover{color:var(--ink)}
+  .env-switch button:focus-visible{outline:2px solid var(--teal);outline-offset:-2px}
+  .env-switch button.on[data-env=staging]{background:var(--green);color:#fff}
+  .env-switch button.on[data-env=staging] .es-dot{background:#fff}
+  .env-switch button.on[data-env=production]{background:var(--oxblood);color:#fff}
+  .env-switch button.on[data-env=production] .es-dot{background:#fff;box-shadow:0 0 0 3px rgba(255,255,255,.35)}
+  .hm-group{display:flex;gap:26px;align-items:flex-end}
+
+  /* guardrail strip */
+  .strip{display:flex;align-items:center;gap:10px;margin-top:14px;padding:9px 14px;border:1px solid var(--amber);background:var(--amber-dim);
+    border-radius:8px;font-family:var(--mono);font-size:12px;color:var(--amber)}
+  .strip .d{width:8px;height:8px;border-radius:50%;background:var(--amber);animation:tick 1.2s infinite}
+  @keyframes tick{0%,100%{opacity:1}50%{opacity:.3}}
+
+  /* tab bar */
+  .tabbar{display:flex;gap:26px;margin:20px 0 22px;border-bottom:1px solid var(--rule)}
+  .tabbar button{background:none;border:0;padding:10px 2px;font-family:var(--disp);font-weight:600;font-size:14px;color:var(--muted);cursor:pointer;position:relative}
+  .tabbar button:hover{color:var(--ink)}
+  .tabbar button.on{color:var(--ink)}
+  .tabbar button.on::after{content:'';position:absolute;left:0;right:0;bottom:-1px;height:2px;background:var(--teal)}
+  .tabbar .df{font-family:var(--mono);font-size:9px;color:var(--muted-2);vertical-align:super;margin-left:5px;letter-spacing:.5px}
+  .view{display:none}.view.on{display:block}
+
+  .layout{display:grid;grid-template-columns:1fr 400px;gap:26px;align-items:start}
+  @media(max-width:1040px){.layout{grid-template-columns:1fr}}
+
+  h2.sh{font-family:var(--disp);font-weight:700;font-size:15px;letter-spacing:.2px;margin:0 0 3px}
+  .sh-sub{font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:14px}
+
+  /* status ledger table */
+  .ledger{background:var(--surface);border:1px solid var(--rule);border-radius:12px;overflow:hidden}
+  .ledger table{width:100%;border-collapse:collapse}
+  .ledger thead th{font-family:var(--mono);font-size:10px;letter-spacing:1.2px;color:var(--muted-2);text-transform:uppercase;
+    text-align:left;padding:12px 16px;border-bottom:1px solid var(--rule);background:var(--surface-2);font-weight:500}
+  .ledger tbody td{padding:14px 16px;border-bottom:1px solid var(--rule);vertical-align:top}
+  .ledger tbody tr:last-child td{border-bottom:0}
+  .ledger tbody tr:hover{background:var(--surface-2)}
+  .tenant b{font-weight:600;font-size:14px}
+  .tenant small{display:block;font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .appcell{cursor:pointer}
+  .appcell .app{font-family:var(--mono);font-size:10px;letter-spacing:1px;color:var(--muted-2);text-transform:uppercase;margin-bottom:4px}
+  .appcell .ver{font-family:var(--mono);font-size:13px;font-weight:500;display:flex;align-items:center;gap:8px}
+  .appcell .ver .sha{color:var(--muted);font-weight:400}
+  .appcell .meta{font-family:var(--mono);font-size:11px;color:var(--muted-2);margin-top:4px}
+  .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .dot.ok{background:var(--green)} .dot.prog{background:var(--amber)} .dot.fault{background:var(--oxblood)} .dot.off{background:var(--rule-2)}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;padding:2px 9px;border-radius:20px;border:1px solid var(--rule-2);color:var(--muted)}
+  .pill.ok{color:var(--green);border-color:var(--teal-line);background:var(--green-dim)}
+  .pill.prog{color:var(--amber);border-color:#e3cf9f;background:var(--amber-dim)}
+  .pill.fault{color:var(--oxblood);border-color:var(--oxblood-line);background:var(--oxblood-dim)}
+
+  /* right column — the event ledger spine */
+  .spine{background:var(--surface);border:1px solid var(--rule);border-radius:12px;position:sticky;top:16px}
+  .spine .sph{padding:14px 16px;border-bottom:1px solid var(--rule);display:flex;align-items:center;justify-content:space-between}
+  .spine .sph h3{margin:0;font-family:var(--disp);font-weight:700;font-size:14px}
+  .spine .sph .stamp{font-family:var(--mono);font-size:9px;letter-spacing:1px;color:var(--teal);border:1px solid var(--teal-line);border-radius:4px;padding:2px 7px}
+  .spine .spb{padding:6px 16px 12px}
+  .entry{display:grid;grid-template-columns:64px 1fr;gap:12px;padding:12px 0;border-bottom:1px solid var(--rule)}
+  .entry:last-child{border-bottom:0}
+  .entry .when{font-family:var(--mono);font-size:11px;color:var(--muted-2);line-height:1.4}
+  .entry .what{font-family:var(--mono);font-size:12px}
+  .entry .what .l1{color:var(--ink)} .entry .what .sha{color:var(--teal);font-weight:600}
+  .entry .what .l2{color:var(--muted);font-size:11px;margin-top:3px}
+  .entry .tagm{display:inline-block;font-family:var(--mono);font-size:9px;letter-spacing:.5px;text-transform:uppercase;padding:1px 6px;border-radius:3px;margin-top:6px}
+  .tagm.deploy{background:var(--teal-dim);color:var(--teal)} .tagm.rollback{background:#eae4f5;color:#6a4bab}
+  .tagm.fail{background:var(--oxblood-dim);color:var(--oxblood)} .tagm.prog{background:var(--amber-dim);color:var(--amber)}
+
+  /* deploy form + type-to-confirm gate */
+  .form{background:var(--surface);border:1px solid var(--rule);border-radius:12px;padding:20px}
+  .fg{margin-bottom:18px}
+  .fg > label{display:block;font-family:var(--mono);font-size:10px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+  .choice{display:flex;gap:8px;flex-wrap:wrap}
+  .choice button{background:var(--surface-2);border:1px solid var(--rule-2);border-radius:7px;padding:9px 14px;font-family:var(--mono);font-size:12px;color:var(--ink-2);cursor:pointer}
+  .choice button.on{background:var(--teal-dim);border-color:var(--teal);color:var(--teal);font-weight:600}
+  input.tin{width:100%;background:var(--surface-2);border:1px solid var(--rule-2);border-radius:7px;padding:11px 13px;font-family:var(--mono);font-size:13px;color:var(--ink)}
+  input.tin:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 3px var(--teal-dim)}
+  .resolve{margin-top:8px;font-family:var(--mono);font-size:11px;color:var(--muted)}
+  .resolve b{color:var(--teal)}
+
+  .confirm-gate{border-top:1px dashed var(--rule-2);margin-top:6px;padding-top:18px}
+  .impact{background:var(--oxblood-dim);border:1px solid var(--oxblood-line);border-radius:8px;padding:12px 14px;font-family:var(--mono);font-size:11.5px;color:var(--oxblood);line-height:1.6;margin-bottom:14px}
+  .impact b{color:#6f1d28}
+  .typegate label{display:block;font-family:var(--mono);font-size:11px;color:var(--ink-2);margin-bottom:8px}
+  .typegate label code{background:var(--surface-2);border:1px solid var(--rule-2);border-radius:4px;padding:1px 6px;color:var(--oxblood);font-weight:600}
+  .typematch{margin-top:7px;font-family:var(--mono);font-size:11px;height:16px}
+  .typematch.no{color:var(--muted-2)} .typematch.yes{color:var(--green)}
+  .go{width:100%;margin-top:16px;padding:13px;border-radius:8px;border:1px solid var(--rule-2);background:var(--surface-2);color:var(--muted-2);
+    font-family:var(--disp);font-weight:700;font-size:14px;letter-spacing:.3px;cursor:not-allowed}
+  .go.ready{background:var(--oxblood);border-color:var(--oxblood);color:#fff;cursor:pointer;box-shadow:0 6px 18px rgba(156,43,58,.25)}
+  .go.ready.stg{background:var(--teal);border-color:var(--teal);box-shadow:0 6px 18px rgba(15,125,136,.22)}
+
+  .logbar{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+  .logrow{display:grid;grid-template-columns:90px 46px 1fr;gap:12px;font-family:var(--mono);font-size:12px;padding:7px 0;border-bottom:1px solid var(--rule)}
+  .logrow .ts{color:var(--muted-2)}.logrow .sv{color:var(--teal)}.logrow.w .msg{color:var(--amber)}
+  .readonly{font-family:var(--mono);font-size:11px;color:var(--amber);background:var(--amber-dim);border:1px solid #e3cf9f;border-radius:7px;padding:9px 13px;margin-bottom:16px;display:inline-block}
+  a.cli{color:var(--teal);text-decoration:none;border-bottom:1px dotted var(--teal-line)}
+  @media(max-width:560px){.header-meta{display:none}.entry{grid-template-columns:52px 1fr}}
+</style>
+</head>
+<body>
+<div class="envbar" id="envbar"></div>
+<div class="wrap">
+  <header>
+    <div class="logo">
+      <div class="name">deploy<span class="k">ctl</span></div>
+      <div class="tag">skincair · sherwood · deployment ledger</div>
+    </div>
+    <div class="header-meta">
+      <div class="env-control">
+        <span class="env-label">Target environment</span>
+        <span class="env-switch" id="envPill">
+          <button data-env="staging"><span class="es-dot"></span>Staging</button>
+          <button data-env="production" class="on"><span class="es-dot"></span>Production</button>
+        </span>
+      </div>
+      <div class="hm-group">
+        <div class="hm"><span class="l">Operator</span><span class="v">mrodsut</span></div>
+        <div class="hm"><span class="l">Adapter</span><span class="v" style="color:var(--teal)">aws</span></div>
+      </div>
+    </div>
+  </header>
+
+  <div class="strip" id="strip">
+    <span class="d"></span>
+    <span>Deploy in progress · <b>production/client3/backend</b> → e77c1b9 · held 00:34 by mrodsut. This target is locked; all others remain deployable.</span>
+  </div>
+
+  <div class="tabbar" id="tabbar">
+    <button class="on" data-view="status">Status</button>
+    <button data-view="deploy">Deploy</button>
+    <button data-view="history">History</button>
+    <button data-view="logs">Logs<span class="df">READ-ONLY</span></button>
+    <button data-view="rollback">Rollback<span class="df">DEFERRED</span></button>
+  </div>
+
+  <!-- STATUS -->
+  <section class="view on" data-view="status">
+    <div class="layout">
+      <div>
+        <h2 class="sh">Current state · <span id="envName">production</span></h2>
+        <div class="sh-sub">one record per env / tenant / app — read from current.json</div>
+        <div class="ledger">
+          <table>
+            <thead><tr><th style="width:34%">Tenant</th><th>Backend</th><th>Frontend</th></tr></thead>
+            <tbody id="statusBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <aside class="spine">
+        <div class="sph"><h3>Deploy ledger</h3><span class="stamp">APPEND-ONLY</span></div>
+        <div class="spb" id="spineBody"></div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- DEPLOY -->
+  <section class="view" data-view="deploy">
+    <div class="layout">
+      <div class="form">
+        <h2 class="sh">Record a deploy</h2>
+        <div class="sh-sub">production requires typing the resolved commit to confirm</div>
+        <div class="fg"><label>App</label><div class="choice" data-c="app"><button class="on">backend</button><button>frontend</button></div></div>
+        <div class="fg"><label>Tenant</label><div class="choice" data-c="tenant"><button class="on">client1 · Meridian</button><button>client2 · Cedar</button><button>client3 · Northlake</button></div></div>
+        <div class="fg"><label>Ref — tag or full SHA (production rejects moving branches)</label>
+          <input class="tin" id="ref" value="v2.14.0" spellcheck="false">
+          <div class="resolve">resolves to <b>a1b2c3d</b> · kind <b>tag</b> · verified against origin</div>
+        </div>
+
+        <div class="confirm-gate">
+          <div class="impact">
+            Deploying to <b>production / client1 / backend</b> restarts <b>sherwood-api-client1</b> and <b>sherwood-worker-client1</b>
+            across <b>2 ASG instances</b> (i-aaa111, i-bbb222) and repoints the tenant symlink to release <b>a1b2c3d</b>.
+          </div>
+          <div class="typegate">
+            <label>Type <code id="need">a1b2c3d</code> to confirm the target commit</label>
+            <input class="tin" id="confirmType" placeholder="commit sha" spellcheck="false" autocomplete="off">
+            <div class="typematch no" id="matchMsg">awaiting confirmation</div>
+          </div>
+          <button class="go ready" id="goBtn">Type commit to enable deploy</button>
+        </div>
+      </div>
+
+      <aside class="spine">
+        <div class="sph"><h3>Sequence</h3><span class="stamp">GUARDED</span></div>
+        <div class="spb">
+          <div class="entry"><div class="when">step 1</div><div class="what"><div class="l1">Set guardrail</div><div class="l2">current.json.inProgress · env/tenant/app</div></div></div>
+          <div class="entry"><div class="when">step 2</div><div class="what"><div class="l1">SSM Run Command</div><div class="l2">prepare release, install, build once</div></div></div>
+          <div class="entry"><div class="when">step 3</div><div class="what"><div class="l1">Symlink + pm2 restart</div><div class="l2">api + worker for this tenant only</div></div></div>
+          <div class="entry"><div class="when">step 4</div><div class="what"><div class="l1">Health check</div><div class="l2">GET /health · client1.sherwood.science</div></div></div>
+          <div class="entry"><div class="when">step 5</div><div class="what"><div class="l1">Record + release guardrail</div><div class="l2">append event · update current.json · deployedBy=mrodsut</div></div></div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- HISTORY -->
+  <section class="view" data-view="history">
+    <h2 class="sh">Deploy history</h2><div class="sh-sub">append-only event records · production · newest first</div>
+    <div class="ledger"><div style="padding:6px 20px" id="histBody"></div></div>
+  </section>
+
+  <!-- LOGS -->
+  <section class="view" data-view="logs">
+    <h2 class="sh">Logs</h2><div class="sh-sub">CloudWatch · /skincair/production/api</div>
+    <div class="readonly">Read-only in the dashboard — mirrors <a class="cli">deployctl logs --tenant client1 --env production --service api --since 1h</a></div>
+    <div class="logbar"><span class="pill">tenant client1</span><span class="pill">service api</span><span class="pill">since 1h</span></div>
+    <div class="ledger"><div style="padding:10px 20px" id="logBody"></div></div>
+  </section>
+
+  <!-- ROLLBACK -->
+  <section class="view" data-view="rollback">
+    <h2 class="sh">Rollback</h2><div class="sh-sub">deferred from the v1 dashboard scope · available in the CLI today</div>
+    <div class="readonly">Restore is handled by <a class="cli">deployctl rollback backend --tenant client1 --env production</a>. Candidate versions from recorded history shown below.</div>
+    <div class="ledger">
+      <table><thead><tr><th>Version</th><th>When</th><th>Note</th></tr></thead>
+      <tbody>
+        <tr><td class="mono"><span class="dot ok" style="display:inline-block;margin-right:8px"></span>9f4e2a1 · v2.13.2</td><td class="mono" style="color:var(--muted)">4d ago</td><td>previous successful — default rollback target</td></tr>
+        <tr><td class="mono"><span class="dot ok" style="display:inline-block;margin-right:8px"></span>3c0ff21 · v2.13.0</td><td class="mono" style="color:var(--muted)">6d ago</td><td>successful</td></tr>
+      </tbody></table>
+    </div>
+  </section>
+</div>
+
+<script>
+  const T={client1:{n:'Meridian Dermatology'},client2:{n:'Cedar Skin Institute'},client3:{n:'Northlake Clinics'}};
+  const DATA={
+    production:[
+      {t:'client1',be:{s:'ok',v:'v2.14.0',x:'a1b2c3d',m:'200 OK · 41ms · 2h · mrodsut'},fe:{s:'ok',v:'v2.14.0',x:'a1b2c3d',m:'synced · 2h · mrodsut'}},
+      {t:'client2',be:{s:'ok',v:'v2.13.2',x:'9f4e2a1',m:'200 OK · 55ms · 1d · ci'},fe:{s:'ok',v:'v2.13.2',x:'9f4e2a1',m:'synced · 1d · ci'}},
+      {t:'client3',be:{s:'prog',v:'deploying',x:'e77c1b9',m:'guardrail held · 00:34 · mrodsut'},fe:{s:'prog',v:'v2.12.0',x:'7a9d0e4',m:'behind production · stale'}},
+    ],
+    staging:[
+      {t:'client1',be:{s:'ok',v:'feat/scheduling',x:'bd41902',m:'200 OK · 20m · mrodsut'},fe:{s:'ok',v:'feat/scheduling',x:'bd41902',m:'synced · 20m'}},
+      {t:'client2',be:{s:'fault',v:'feat/import',x:'c1902ab',m:'503 · api down · 6m'},fe:{s:'ok',v:'feat/import',x:'c1902ab',m:'synced · 6m'}},
+      {t:'client3',be:{s:'off',v:'not deployed',x:'—',m:'no current.json record'},fe:{s:'off',v:'not deployed',x:'—',m:'no current.json record'}},
+    ]
+  };
+  const LEDGER=[
+    {w:'00:34 ago',tag:'prog',l1:'deploy · in progress → <span class="sha">e77c1b9</span>',l2:'client3 / backend · guardrail held'},
+    {w:'2h ago<br>09:14Z',tag:'deploy',l1:'deploy · success → <span class="sha">a1b2c3d</span>',l2:'client1 / backend · v2.14.0 · 2 inst · 3m12s'},
+    {w:'2h ago<br>09:14Z',tag:'deploy',l1:'deploy · success → <span class="sha">a1b2c3d</span>',l2:'client1 / frontend · artifact synced'},
+    {w:'4d ago',tag:'rollback',l1:'rollback → <span class="sha">9f4e2a1</span>',l2:'client1 / backend · from bd41902 · health regressed'},
+    {w:'4d ago',tag:'fail',l1:'deploy · partial_failure → <span class="sha">bd41902</span>',l2:'client1 / backend · i-bbb222 npm ci failed'},
+    {w:'6d ago',tag:'deploy',l1:'deploy · success → <span class="sha">3c0ff21</span>',l2:'client2 / backend · v2.13.0'},
+  ];
+  const LOG=[
+    {ts:'09:14:02Z',sv:'api',msg:'listening :8080 (sherwood-api-client1) release a1b2c3d'},
+    {ts:'09:14:03Z',sv:'api',msg:'health check passed — GET /health 200 41ms'},
+    {ts:'09:22:41Z',sv:'api',msg:'POST /v1/appointments 201 tenant=client1 in 88ms'},
+    {ts:'09:31:10Z',sv:'api',w:true,msg:'redis pool at 82% — skincair/production/redis'},
+    {ts:'09:47:55Z',sv:'api',msg:'GET /v1/patients?page=2 200 tenant=client1 63ms'},
+  ];
+  let ENV='production';
+
+  function appcell(app,d){
+    const pill = d.s==='ok'?`<span class="pill ok"><span class="dot ok"></span>healthy</span>`
+      : d.s==='prog'?`<span class="pill prog"><span class="dot prog"></span>in progress</span>`
+      : d.s==='fault'?`<span class="pill fault"><span class="dot fault"></span>health fault</span>`
+      : `<span class="pill"><span class="dot off"></span>not deployed</span>`;
+    return `<td class="appcell">
+      <div class="app">${app}</div>
+      <div class="ver">${d.v} ${d.x!=='—'?'<span class="sha">· '+d.x+'</span>':''}</div>
+      <div style="margin-top:6px">${pill}</div>
+      <div class="meta">${d.m}</div></td>`;
+  }
+  function renderStatus(){
+    document.getElementById('envName').textContent=ENV;
+    document.getElementById('statusBody').innerHTML = DATA[ENV].map(r=>`
+      <tr><td class="tenant"><b>${T[r.t].n}</b><small>${r.t}</small></td>${appcell('backend',r.be)}${appcell('frontend',r.fe)}</tr>`).join('');
+  }
+  document.getElementById('spineBody').innerHTML = LEDGER.map(e=>`
+    <div class="entry"><div class="when">${e.w}</div>
+      <div class="what"><div class="l1">${e.l1}</div><div class="l2">${e.l2}</div><span class="tagm ${e.tag}">${e.tag}</span></div></div>`).join('');
+  document.getElementById('histBody').innerHTML = LEDGER.map(e=>`
+    <div class="entry"><div class="when">${e.w}</div>
+      <div class="what"><div class="l1">${e.l1}</div><div class="l2">${e.l2}</div><span class="tagm ${e.tag}">${e.tag}</span></div></div>`).join('');
+  document.getElementById('logBody').innerHTML = LOG.map(l=>`
+    <div class="logrow ${l.w?'w':''}"><span class="ts">${l.ts}</span><span class="sv">${l.sv}</span><span class="msg">${l.msg}</span></div>`).join('');
+
+  document.getElementById('envPill').addEventListener('click',e=>{
+    const b=e.target.closest('button');if(!b)return;ENV=b.dataset.env;
+    [...e.currentTarget.children].forEach(x=>x.classList.toggle('on',x===b));
+    document.body.classList.toggle('stg', ENV==='staging');
+    document.getElementById('strip').style.display = ENV==='production'?'flex':'none';
+    // production uses type-to-confirm; staging enables directly
+    updateGate();
+    renderStatus();
+  });
+  document.getElementById('tabbar').addEventListener('click',e=>{
+    const b=e.target.closest('button');if(!b)return;const v=b.dataset.view;
+    [...document.querySelectorAll('#tabbar button')].forEach(x=>x.classList.toggle('on',x===b));
+    document.querySelectorAll('.view').forEach(s=>s.classList.toggle('on',s.dataset.view===v));
+  });
+  document.querySelectorAll('.choice').forEach(c=>c.addEventListener('click',e=>{
+    const b=e.target.closest('button');if(!b)return;[...c.children].forEach(x=>x.classList.toggle('on',x===b));
+  }));
+
+  // type-to-confirm gate
+  const need=document.getElementById('need'), confirmType=document.getElementById('confirmType'),
+        matchMsg=document.getElementById('matchMsg'), goBtn=document.getElementById('goBtn');
+  function updateGate(){
+    const isProd = ENV==='production';
+    document.querySelector('.confirm-gate .typegate').style.display = isProd?'block':'none';
+    goBtn.classList.toggle('stg',!isProd);
+    if(!isProd){ goBtn.classList.add('ready'); goBtn.textContent='Deploy to staging'; }
+    else { checkMatch(); }
+  }
+  function checkMatch(){
+    const ok = confirmType.value.trim()===need.textContent.trim();
+    matchMsg.className='typematch '+(ok?'yes':'no');
+    matchMsg.textContent = ok?'✓ commit matches — deploy enabled':'awaiting confirmation';
+    goBtn.classList.toggle('ready',ok);
+    goBtn.textContent = ok?'Deploy a1b2c3d → production':'Type commit to enable deploy';
+  }
+  confirmType.addEventListener('input',checkMatch);
+  goBtn.addEventListener('click',()=>{
+    if(!goBtn.classList.contains('ready'))return;
+    goBtn.textContent='✓ Recorded · guardrail set · SSM dispatched';
+    goBtn.style.filter='saturate(1.15)';
+  });
+
+  renderStatus(); updateGate();
+</script>
+</body>
+</html>
