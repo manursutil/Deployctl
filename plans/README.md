@@ -13,6 +13,7 @@ Planned against commit `a001b1b` on `main`.
 | [003](003-verify-direct-commit-shas.md) | Verify direct commit SHA refs against the configured repository | P2 | S/M | — | DONE |
 | [004](004-enforce-frontend-build-identity-inputs.md) | Enforce configured frontend build identity inputs | P2 | S | — | DONE |
 | [005](005-add-git-adapter-tests.md) | Add focused tests for the Git CLI adapter boundary | P3 | S | 003 | DONE |
+| [006](006-deepen-deploy-lifecycle-module.md) | Deepen the deploy lifecycle module | P2 | M | — | TODO |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale — finding fixed independently or approach abandoned)
 
@@ -22,6 +23,7 @@ Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJE
 - Plan 002 should land before any real S3-backed history/current-state adapter or executable deploy command relies on the guardrail in production.
 - Plan 003 and Plan 005 were executed together in `src/adapters/git.ts` and `test/git.test.ts`: Plan 003 added the full-SHA verification and the injectable `GitCommandRunner` seam, and Plan 005's adapter-boundary tests were completed in the same `test/git.test.ts` rather than duplicated. Both are `DONE`.
 - Plan 004 should land before wiring the real frontend build adapter, so artifact reuse semantics are fixed before real artifacts are created.
+- Plan 006 should land before adding real AWS deploy adapters if possible, so backend deploy, frontend deploy, rollback, and reconcile share one guarded lifecycle before production execution depends on it.
 
 ## Verification baseline from audit
 
