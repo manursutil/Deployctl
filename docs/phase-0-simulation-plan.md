@@ -211,23 +211,22 @@ Demo acceptance:
 
 ## Demo Flow
 
-This is the **post–Sim Phase 4 end state**, not a flow that runs today. It exercises commands that are not yet wired (`rollback`, `logs`) and controllers that currently throw a pending error (`deploy`, `status`); each becomes runnable only as its Sim Phase lands. See the per-phase demo acceptance for what is runnable at each step.
-
-The target demo should fit in one terminal session:
+Sim Phases 1–5 are implemented, so this flow runs today through public CLI commands. The full operator walkthrough — with expected output, the production replacement demo, reset instructions, and a secret-safety note — lives in `docs/simulation-runbook.md` (Sim Phase 6). The staging happy path in one terminal session:
 
 ```bash
-docker compose -f docker-compose.sim.yml up -d
-npm test
-npm run typecheck
+docker compose -f docker-compose.sim.yml up -d --build
 node --import tsx src/cli.ts tenants list --env staging --tenants tenants.sim.yml
 node --import tsx src/cli.ts deploy backend --tenant client1 --env staging --ref main --config deployctl.sim.config.yml --tenants tenants.sim.yml
 node --import tsx src/cli.ts status --tenant client1 --env staging --config deployctl.sim.config.yml --tenants tenants.sim.yml
+# Two frontend versions so rollback has an earlier one to restore:
+node --import tsx src/cli.ts deploy frontend --tenant client1 --env staging --ref 79677ebd968e907fca2b2b348ac61116d86fb5a3 --config deployctl.sim.config.yml --tenants tenants.sim.yml
 node --import tsx src/cli.ts deploy frontend --tenant client1 --env staging --ref main --config deployctl.sim.config.yml --tenants tenants.sim.yml
 node --import tsx src/cli.ts rollback frontend --tenant client1 --env staging --config deployctl.sim.config.yml --tenants tenants.sim.yml
 node --import tsx src/cli.ts logs --tenant client1 --env staging --service api --since 1h --config deployctl.sim.config.yml --tenants tenants.sim.yml
+docker compose -f docker-compose.sim.yml down -v && rm -rf .deployctl-sim
 ```
 
-The exact flags may change as the CLI controllers are wired, but the demo must use public CLI commands rather than test-only entrypoints.
+The demo uses public CLI commands rather than test-only entrypoints. See the runbook for the production replacement demo (`--profile production` + `deployctl reconcile backend`).
 
 ## Implementation Phases
 
@@ -303,9 +302,13 @@ Scope: this simulates the Phase 10 mechanism; real ASG reconciliation (resolving
 
 ### Sim Phase 6: Demo Runbook
 
-- Add a short operator demo script or runbook.
-- Include reset instructions for `.deployctl-sim/`.
-- Include expected output snippets without secrets.
+Status: `Done`
+
+- [x] Add a short operator demo script or runbook.
+- [x] Include reset instructions for `.deployctl-sim/`.
+- [x] Include expected output snippets without secrets.
+
+Completed: `docs/simulation-runbook.md` is the operator runbook — a staging walkthrough (backend/frontend deploy, status, the secret-name-only boundary, frontend rollback, logs) and the production replacement demo (two-instance deploy, replacement recreation, `reconcile backend`), all through public CLI commands. It includes reset instructions for the containers/volumes and `.deployctl-sim/`, and a "what this proves / does not prove" section. Output snippets were captured from real runs with secret values redacted. This completes the simulation lane (Sim Phases 1–6).
 
 ## Documentation Updates Required During Implementation
 

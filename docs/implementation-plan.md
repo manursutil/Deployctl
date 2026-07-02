@@ -86,7 +86,7 @@ Status: `Not started`
 
 Goal: confirm infrastructure assumptions before concrete AWS-facing implementation.
 
-Interim demo path: `docs/phase-0-simulation-plan.md` defines a Docker-based simulation lane so the deployment model can be demonstrated and the remaining adapters can be developed without waiting for real Phase 0 answers. That simulation does not mark Phase 0 tasks as confirmed; real cutover work is tracked in `docs/phase-0-real-cutover.md`. Sim Phase 1 (local persistence: `adapterMode`, `FileSystemDeployHistoryRepository`, `deployctl status` reading simulated state), Sim Phase 2 (backend container: Docker app-server, `scripts/ec2/deploy-backend.sh`, `DockerSimSsmDeployExecutor`, `deployctl deploy backend` running end to end against it), Sim Phase 3 (frontend artifacts + rollback: `FileSystemFrontendArtifactStore`/`FileSystemFrontendSync`, `FixtureFrontendBuilder`, `deployctl deploy frontend` and both `rollback` controllers wired for `adapterMode: sim`), Sim Phase 4 (logs: net-new `LogQuery` core seam + `getTenantLogs`, `FileSystemLogQuery`, `deployctl logs` controller, container-written log fixtures), and Sim Phase 5 (production replacement demo: two-container `production` compose profile, `reconcileBackend` core + `deployctl reconcile backend` controller demonstrating replacement-instance recovery) are done; see the simulation plan for the remaining Sim Phase (demo runbook).
+Interim demo path: `docs/phase-0-simulation-plan.md` defines a Docker-based simulation lane so the deployment model can be demonstrated and the remaining adapters can be developed without waiting for real Phase 0 answers. That simulation does not mark Phase 0 tasks as confirmed; real cutover work is tracked in `docs/phase-0-real-cutover.md`. Sim Phase 1 (local persistence: `adapterMode`, `FileSystemDeployHistoryRepository`, `deployctl status` reading simulated state), Sim Phase 2 (backend container: Docker app-server, `scripts/ec2/deploy-backend.sh`, `DockerSimSsmDeployExecutor`, `deployctl deploy backend` running end to end against it), Sim Phase 3 (frontend artifacts + rollback: `FileSystemFrontendArtifactStore`/`FileSystemFrontendSync`, `FixtureFrontendBuilder`, `deployctl deploy frontend` and both `rollback` controllers wired for `adapterMode: sim`), Sim Phase 4 (logs: net-new `LogQuery` core seam + `getTenantLogs`, `FileSystemLogQuery`, `deployctl logs` controller, container-written log fixtures), Sim Phase 5 (production replacement demo: two-container `production` compose profile, `reconcileBackend` core + `deployctl reconcile backend` controller demonstrating replacement-instance recovery), and Sim Phase 6 (operator demo runbook, `docs/simulation-runbook.md`) are done. The simulation lane (Sim Phases 1–6) is complete; real cutover work is tracked in `docs/phase-0-real-cutover.md`.
 
 Work this phase from `docs/phase-0-checklist.md`, which restates the tasks below as concrete questions grouped by the AWS adapter each answer unblocks. Every orchestration module is already implemented behind a seam, so Phase 0 is the remaining gate for AWS-facing execution.
 
@@ -447,6 +447,7 @@ Current docs:
 - `docs/phase-0-checklist.md`
 - `docs/phase-0-simulation-plan.md`
 - `docs/phase-0-real-cutover.md`
+- `docs/simulation-runbook.md`
 - `CONTEXT.md`
 
 Completed:
