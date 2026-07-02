@@ -245,11 +245,15 @@ Note: no deploy command populates state until Sim Phase 2/3, so `status` here is
 
 ### Sim Phase 2: Backend Container
 
-- Add Docker Compose app-server.
-- Add EC2-local backend deploy script.
-- Add simulated SSM executor that runs the script in the container.
-- Keep `scripts/ec2/deploy-backend.sh` path-parameterized: read the release root, tenant base dir, and OS user from config/env rather than hardcoding `/opt/sherwood/...`, so real cutover is a value change, not a rewrite (non-goal: simulated paths must not become production defaults).
-- Wire the backend deploy CLI controller to the simulated executor (replaces the current pending-throw when `adapterMode: sim`).
+Status: `Done`
+
+- [x] Add Docker Compose app-server.
+- [x] Add EC2-local backend deploy script.
+- [x] Add simulated SSM executor that runs the script in the container.
+- [x] Keep `scripts/ec2/deploy-backend.sh` path-parameterized: read the release root, tenant base dir, and OS user from config/env rather than hardcoding `/opt/sherwood/...`, so real cutover is a value change, not a rewrite (non-goal: simulated paths must not become production defaults).
+- [x] Wire the backend deploy CLI controller to the simulated executor (replaces the current pending-throw when `adapterMode: sim`).
+
+Completed: `docker-compose.sim.yml` + `docker/sim/app-server/` build one staging "EC2" container (Node health server, `/opt/sherwood` named volume, `scripts/ec2/` bind-mounted read-only). `scripts/ec2/deploy-backend.sh` reads `DEPLOYCTL_RELEASE_ROOT`/`DEPLOYCTL_TENANT_BASE_DIR`/`DEPLOYCTL_OS_USER` from its environment (never hardcoded), prepares the release directory, updates the tenant symlink, resolves secret values from `docker/sim/app-server/secret-fixtures.json` inside the container (deployctl only ever passes secret names — `DockerSimSsmDeployExecutor`, `src/adapters/docker-ssm.ts` — keeping the Hop B shape), writes a process-status marker standing in for a PM2 restart, and gates on a real HTTP health check. `deployctl deploy backend --config deployctl.sim.config.yml` (`src/cli.ts`) runs this through the existing `deployBackend` orchestration and `GitCliRefResolver` pointed at this repo (`applicationRepository.url: .`, no fixture repo needed). Scope: staging only, single container, no real app build (release directories are metadata markers) — multi-instance/production and a real fixture app repo are later phases. Covered by `test/docker-ssm.test.ts` (mocked); the full path was verified manually against a real container (see PR).
 
 ### Sim Phase 3: Frontend Artifacts
 
