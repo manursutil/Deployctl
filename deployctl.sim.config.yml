@@ -46,8 +46,13 @@ ssmTargets:
     instanceIds:
       - deployctl-sim-app-server-staging
   production:
-    mode: asg
-    autoScalingGroupName: sherwood-production-asg
+    # In real infra this is an ASG (see deployctl.config.yml). The simulation stands
+    # in for the ASG's healthy instances with two named production containers
+    # (Sim Phase 5 replacement demo), addressed as instanceIds.
+    mode: instanceIds
+    instanceIds:
+      - deployctl-sim-app-server-production-1
+      - deployctl-sim-app-server-production-2
 
 backendDeploy:
   releaseRoot: /opt/sherwood/releases
