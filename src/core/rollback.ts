@@ -3,7 +3,6 @@ import type { DeployctlConfig } from "./config.js";
 import type { SsmDeployExecutor } from "./deploy.js";
 import type { FrontendSmokeCheck, FrontendSync } from "./frontend.js";
 import {
-  applySuccessfulEventToCurrentState,
   eventVersion,
   formatRollbackEventId,
   newRollbackEvent,
@@ -14,7 +13,7 @@ import {
   type RollbackEvent,
   type RollbackEventStatus,
 } from "./history.js";
-import { clearDeploymentGuardrail, startDeploymentGuardrail } from "./guardrail.js";
+import { runDeployLifecycle } from "./lifecycle.js";
 import { getTenantConfig, type TenantRegistry } from "./tenants.js";
 
 const fullCommitShaPattern = /^[0-9a-f]{40}$/i;
@@ -115,16 +114,16 @@ export async function rollbackBackend(input: RollbackBackendInput): Promise<Roll
 
   const selection = await selectRollbackTarget(input.history, target, input.toVersion);
 
-  const startedAt = clock();
-  const eventId = (input.generateEventId ?? formatRollbackEventId)(startedAt);
+  let recordedEvent: RollbackEvent | undefined;
 
-  await startDeploymentGuardrail(input.history, target, { eventId, since: startedAt.toISOString(), actor: input.actor });
-
-  try {
-    let outcome;
-
-    try {
-      outcome = await input.executor.runBackendDeploy({
+  const lifecycle = await runDeployLifecycle({
+    target,
+    actor: input.actor,
+    history: input.history,
+    clock,
+    generateEventId: input.generateEventId ?? formatRollbackEventId,
+    work: async () => {
+      const outcome = await input.executor.runBackendDeploy({
         target,
         resolvedCommit: selection.targetVersion,
         tenant,
@@ -132,45 +131,44 @@ export async function rollbackBackend(input: RollbackBackendInput): Promise<Roll
         build: input.config.build.backend,
         applicationRepositoryUrl: input.config.applicationRepository.url,
       });
-    } catch (error) {
-      await recordRollbackFailure(input.history, {
-        target,
-        eventId,
-        selection,
-        actor: input.actor,
-        startedAt,
-        finishedAt: clock(),
-        errorMessage: formatError(error),
-      });
-      throw error instanceof DeployctlError
-        ? error
-        : new DeployctlError(`Backend rollback failed for ${targetLabel(target)}: ${formatError(error)}`);
-    }
+      return { outcome, status: overallStatus(outcome.instances) };
+    },
+    record: {
+      updateCurrentStateOnSuccess: true,
+      success: ({ outcome, status }, context) => {
+        recordedEvent = newRollbackEvent({
+          target,
+          eventId: context.eventId,
+          targetVersion: selection.targetVersion,
+          previousVersion: selection.previousVersion,
+          actor: input.actor,
+          status,
+          startedAt: context.startedAt,
+          finishedAt: context.finishedAt,
+          ssmCommandId: outcome.ssmCommandId,
+          instances: outcome.instances,
+        });
+        return recordedEvent;
+      },
+      failure: (error, context) =>
+        rollbackFailureEvent({
+          target,
+          eventId: context.eventId,
+          selection,
+          actor: input.actor,
+          startedAt: context.startedAt,
+          finishedAt: context.finishedAt,
+          errorMessage: formatError(error),
+        }),
+    },
+    errorMessage: (error) => `Backend rollback failed for ${targetLabel(target)}: ${formatError(error)}`,
+  });
 
-    const status = overallStatus(outcome.instances);
-    const event = newRollbackEvent({
-      target,
-      eventId,
-      targetVersion: selection.targetVersion,
-      previousVersion: selection.previousVersion,
-      actor: input.actor,
-      status,
-      startedAt,
-      finishedAt: clock(),
-      ssmCommandId: outcome.ssmCommandId,
-      instances: outcome.instances,
-    });
-
-    await input.history.appendEvent(event);
-
-    if (status === "success") {
-      await input.history.updateCurrentState(applySuccessfulEventToCurrentState(event));
-    }
-
-    return { status, event };
-  } finally {
-    await clearDeploymentGuardrail(input.history, target, eventId);
+  if (recordedEvent === undefined) {
+    throw new DeployctlError(`Backend rollback failed for ${targetLabel(target)}: missing history event`);
   }
+
+  return { status: lifecycle.result.status, event: recordedEvent };
 }
 
 export type RollbackFrontendInput = {
@@ -206,102 +204,88 @@ export async function rollbackFrontend(input: RollbackFrontendInput): Promise<Ro
     throw new DeployctlError(`No recorded frontend artifact for version ${selection.targetVersion} of ${targetLabel(target)}`);
   }
 
-  const startedAt = clock();
-  const eventId = (input.generateEventId ?? formatRollbackEventId)(startedAt);
+  let recordedEvent: RollbackEvent | undefined;
+  let failureMessage = (error: unknown) => `Frontend rollback failed for ${targetLabel(target)}: ${formatError(error)}`;
 
-  await startDeploymentGuardrail(input.history, target, { eventId, since: startedAt.toISOString(), actor: input.actor });
-
-  try {
-    try {
+  const lifecycle = await runDeployLifecycle({
+    target,
+    actor: input.actor,
+    history: input.history,
+    clock,
+    generateEventId: input.generateEventId ?? formatRollbackEventId,
+    work: async () => {
       await input.sync.sync({ bucket: tenant.frontendBucket, storageKey: artifactStorageKey });
-    } catch (error) {
-      await recordRollbackFailure(input.history, {
-        target,
-        eventId,
-        selection,
-        actor: input.actor,
-        startedAt,
-        finishedAt: clock(),
-        errorMessage: formatError(error),
-        artifactStorageKey,
-      });
-      throw error instanceof DeployctlError
-        ? error
-        : new DeployctlError(`Frontend rollback failed for ${targetLabel(target)}: ${formatError(error)}`);
-    }
 
-    let healthy: boolean;
-    try {
-      healthy = await input.smokeCheck.check(tenant.frontendUrl);
-    } catch (error) {
-      await recordRollbackFailure(input.history, {
-        target,
-        eventId,
-        selection,
-        actor: input.actor,
-        startedAt,
-        finishedAt: clock(),
-        errorMessage: formatError(error),
-        artifactStorageKey,
-      });
-      throw error instanceof DeployctlError
-        ? error
-        : new DeployctlError(`Frontend rollback smoke check failed for ${targetLabel(target)}: ${formatError(error)}`);
-    }
+      failureMessage = (error: unknown) =>
+        `Frontend rollback smoke check failed for ${targetLabel(target)}: ${formatError(error)}`;
+      const healthy = await input.smokeCheck.check(tenant.frontendUrl);
 
-    const status: RollbackEventStatus = healthy ? "success" : "failure";
-    const event = newRollbackEvent({
-      target,
-      eventId,
-      targetVersion: selection.targetVersion,
-      previousVersion: selection.previousVersion,
-      actor: input.actor,
-      status,
-      startedAt,
-      finishedAt: clock(),
-      errorMessage: healthy ? undefined : `frontend smoke check failed: ${tenant.frontendUrl}`,
-      artifactStorageKey,
-    });
+      return {
+        status: healthy ? ("success" as const) : ("failure" as const),
+        errorMessage: healthy ? undefined : `frontend smoke check failed: ${tenant.frontendUrl}`,
+      };
+    },
+    record: {
+      updateCurrentStateOnSuccess: true,
+      success: (result, context) => {
+        recordedEvent = newRollbackEvent({
+          target,
+          eventId: context.eventId,
+          targetVersion: selection.targetVersion,
+          previousVersion: selection.previousVersion,
+          actor: input.actor,
+          status: result.status,
+          startedAt: context.startedAt,
+          finishedAt: context.finishedAt,
+          errorMessage: result.errorMessage,
+          artifactStorageKey,
+        });
+        return recordedEvent;
+      },
+      failure: (error, context) =>
+        rollbackFailureEvent({
+          target,
+          eventId: context.eventId,
+          selection,
+          actor: input.actor,
+          startedAt: context.startedAt,
+          finishedAt: context.finishedAt,
+          errorMessage: formatError(error),
+          artifactStorageKey,
+        }),
+    },
+    errorMessage: failureMessage,
+  });
 
-    await input.history.appendEvent(event);
-
-    if (status === "success") {
-      await input.history.updateCurrentState(applySuccessfulEventToCurrentState(event));
-    }
-
-    return { status, event };
-  } finally {
-    await clearDeploymentGuardrail(input.history, target, eventId);
+  if (recordedEvent === undefined) {
+    throw new DeployctlError(`Frontend rollback failed for ${targetLabel(target)}: missing history event`);
   }
+
+  return { status: lifecycle.result.status, event: recordedEvent };
 }
 
-async function recordRollbackFailure(
-  history: DeployHistoryRepository,
-  input: {
-    target: DeployTarget;
-    eventId: string;
-    selection: RollbackSelection;
-    actor: string;
-    startedAt: Date;
-    finishedAt: Date;
-    errorMessage: string;
-    artifactStorageKey?: string;
-  },
-): Promise<void> {
-  await history.appendEvent(
-    newRollbackEvent({
-      target: input.target,
-      eventId: input.eventId,
-      targetVersion: input.selection.targetVersion,
-      previousVersion: input.selection.previousVersion,
-      actor: input.actor,
-      status: "failure",
-      startedAt: input.startedAt,
-      finishedAt: input.finishedAt,
-      errorMessage: input.errorMessage,
-      artifactStorageKey: input.artifactStorageKey,
-    }),
-  );
+function rollbackFailureEvent(input: {
+  target: DeployTarget;
+  eventId: string;
+  selection: RollbackSelection;
+  actor: string;
+  startedAt: Date;
+  finishedAt: Date;
+  errorMessage: string;
+  artifactStorageKey?: string;
+}): RollbackEvent {
+  return newRollbackEvent({
+    target: input.target,
+    eventId: input.eventId,
+    targetVersion: input.selection.targetVersion,
+    previousVersion: input.selection.previousVersion,
+    actor: input.actor,
+    status: "failure",
+    startedAt: input.startedAt,
+    finishedAt: input.finishedAt,
+    errorMessage: input.errorMessage,
+    artifactStorageKey: input.artifactStorageKey,
+  });
 }
 
 function overallStatus(instances: DeployInstanceResult[]): RollbackEventStatus {
