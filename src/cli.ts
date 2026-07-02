@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 import { DockerSimSsmDeployExecutor } from "./adapters/docker-ssm.js";
+import { FixtureFrontendBuilder, NoopFrontendSmokeCheck } from "./adapters/fixture-frontend.js";
 import { FileSystemDeployHistoryRepository } from "./adapters/filesystem-history.js";
+import { FileSystemFrontendArtifactStore, FileSystemFrontendSync } from "./adapters/filesystem-frontend.js";
 import { GitCliRefResolver } from "./adapters/git.js";
 import { loadDeployctlConfig } from "./core/config.js";
 import { deployBackend } from "./core/deploy.js";
 import { formatTenantStatus, getTenantStatus } from "./core/diagnostics.js";
+import { deployFrontend } from "./core/frontend.js";
+import { rollbackBackend, rollbackFrontend } from "./core/rollback.js";
 import { getTenantConfig, listTenants, loadTenantRegistry } from "./core/tenants.js";
 import { DeployctlError, formatError, type Io } from "./shared.js";
 
@@ -180,7 +184,7 @@ async function runDeployFrontend(args: string[], io: Io): Promise<number> {
   const environment = requiredOption(args, "--env");
   const requestedRef = requiredOption(args, "--ref");
 
-  await loadDeployctlConfig(optionValue(args, "--config") ?? "deployctl.config.yml");
+  const config = await loadDeployctlConfig(optionValue(args, "--config") ?? "deployctl.config.yml");
   const registry = await loadTenantRegistry(optionValue(args, "--tenants") ?? "tenants.yml");
 
   // Validate the tenant/env (and that it has a frontend bucket/URL) offline
@@ -188,6 +192,43 @@ async function runDeployFrontend(args: string[], io: Io): Promise<number> {
   getTenantConfig(registry, environment, tenant);
 
   io.stdout.write(`Validated frontend deploy for ${environment}/${tenant} (ref ${requestedRef}).\n`);
+
+  // Sim Phase 3 (docs/phase-0-simulation-plan.md): adapterMode: sim builds through
+  // the fixture builder and syncs via the filesystem adapters instead of the
+  // pending S3/build adapters, using the same deployFrontend orchestration.
+  if (config.adapterMode === "sim") {
+    // Build-variable source is a Sim Phase 3 simulation assumption, not a
+    // confirmed Phase 0 answer (docs/phase-0-checklist.md): derived directly
+    // from --tenant/--env to match deployctl.sim.config.yml's identity inputs.
+    const buildVariables = { VITE_TENANT: tenant, VITE_ENVIRONMENT: environment };
+
+    const result = await deployFrontend({
+      env: environment,
+      tenant,
+      requestedRef,
+      actor: "cli",
+      buildVariables,
+      config,
+      registry,
+      refResolver: new GitCliRefResolver(),
+      history: new FileSystemDeployHistoryRepository(process.env.DEPLOYCTL_SIM_ROOT),
+      artifacts: new FileSystemFrontendArtifactStore(process.env.DEPLOYCTL_SIM_ROOT),
+      builder: new FixtureFrontendBuilder(),
+      sync: new FileSystemFrontendSync(process.env.DEPLOYCTL_SIM_ROOT),
+      smokeCheck: new NoopFrontendSmokeCheck(),
+    });
+
+    if (result.status !== "success") {
+      throw new DeployctlError(
+        `Frontend deploy ${result.status} for ${environment}/${tenant} (commit ${result.event.resolvedCommit}).`,
+      );
+    }
+
+    io.stdout.write(
+      `Frontend deploy succeeded for ${environment}/${tenant} (commit ${result.event.resolvedCommit}, ${result.reused ? "reused" : "built"} artifact).\n`,
+    );
+    return 0;
+  }
 
   // The orchestration module (deployFrontend) is implemented and unit-tested
   // behind the artifact-store, builder, sync, and smoke-check seams, but the

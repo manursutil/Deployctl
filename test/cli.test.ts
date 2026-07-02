@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -29,7 +29,9 @@ async function writeSimConfig(dir: string): Promise<string> {
 aws:
   region: eu-west-1
 applicationRepository:
-  url: ssh://git@bitbucket.org/example/application-monorepo.git
+  # Points at this repo, like deployctl.sim.config.yml, so git ls-remote resolves
+  # real refs (e.g. "main") without a separate fixture repository.
+  url: .
 build:
   backend:
     packageManager: npm
@@ -207,6 +209,34 @@ test("deployctl status surfaces the inProgress guardrail from simulated current 
 
   assert.equal(result.status, 0);
   assert.match(result.stdout, /deploy in progress: dep_20260701_100000/);
+});
+
+test("deployctl deploy frontend builds and stores an artifact when adapterMode is sim, then reuses it on repeat", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "deployctl-sim-deploy-frontend-"));
+  const configPath = await writeSimConfig(dir);
+  const tenantsPath = join(dir, "tenants.yml");
+  await writeFile(tenantsPath, simTenantsYaml);
+  const simRoot = join(dir, ".deployctl-sim");
+  const env = { ...process.env, DEPLOYCTL_SIM_ROOT: simRoot };
+
+  const first = spawnSync(
+    process.execPath,
+    ["--import", "tsx", cliPath, "deploy", "frontend", "--tenant", "client1", "--env", "staging", "--ref", "main", "--config", configPath, "--tenants", tenantsPath],
+    { encoding: "utf8", env },
+  );
+  assert.equal(first.status, 0, first.stderr);
+  assert.match(first.stdout, /built artifact/);
+
+  const bucketFile = join(simRoot, "frontend-buckets", "skincair-staging-frontend-client1", "index.html");
+  assert.match(await readFile(bucketFile, "utf8"), /client1/);
+
+  const second = spawnSync(
+    process.execPath,
+    ["--import", "tsx", cliPath, "deploy", "frontend", "--tenant", "client1", "--env", "staging", "--ref", "main", "--config", configPath, "--tenants", tenantsPath],
+    { encoding: "utf8", env },
+  );
+  assert.equal(second.status, 0, second.stderr);
+  assert.match(second.stdout, /reused artifact/);
 });
 
 test("deployctl deploy backend requires --ref", () => {
