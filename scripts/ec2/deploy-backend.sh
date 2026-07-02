@@ -86,16 +86,19 @@ curl -fsS http://localhost:8080/health > /dev/null
 # 6. Simulation-only: emit a startup log line per service so `deployctl logs` has
 # something to read (Sim Phase 4). Guarded by DEPLOYCTL_LOG_ROOT, which only the sim
 # executor sets — the real script logs to the process's stdout (captured by
-# CloudWatch), not to a file, so production never takes this branch.
+# CloudWatch), not to a file, so production never takes this branch. Best-effort:
+# these fixtures are a demo convenience and must never fail the deploy (e.g. if the
+# host bind mount backing DEPLOYCTL_LOG_ROOT was removed while the container ran).
 if [ -n "${DEPLOYCTL_LOG_ROOT:-}" ]; then
   log_dir="$DEPLOYCTL_LOG_ROOT/$DEPLOYCTL_ENV/$DEPLOYCTL_TENANT"
-  mkdir -p "$log_dir"
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  for service in api worker; do
-    printf '{"timestamp":"%s","env":"%s","tenant":"%s","service":"%s","message":"%s process started at %s"}\n' \
-      "$now" "$DEPLOYCTL_ENV" "$DEPLOYCTL_TENANT" "$service" "$service" "$DEPLOYCTL_COMMIT" \
-      >> "$log_dir/$service.log"
-  done
+  if mkdir -p "$log_dir" 2>/dev/null; then
+    for service in api worker; do
+      printf '{"timestamp":"%s","env":"%s","tenant":"%s","service":"%s","message":"%s process started at %s"}\n' \
+        "$now" "$DEPLOYCTL_ENV" "$DEPLOYCTL_TENANT" "$service" "$service" "$DEPLOYCTL_COMMIT" \
+        >> "$log_dir/$service.log" 2>/dev/null || true
+    done
+  fi
 fi
 
 echo "deploy-backend: tenant=$DEPLOYCTL_TENANT env=$DEPLOYCTL_ENV commit=$DEPLOYCTL_COMMIT ok"

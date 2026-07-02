@@ -235,6 +235,8 @@ The simulation keeps all state in two places, both safe to delete between runs:
 - Containers and their volumes: `docker compose -f docker-compose.sim.yml [--profile production] down -v`.
 - Host-side history/artifacts/logs: `rm -rf .deployctl-sim` (git-ignored). `DEPLOYCTL_SIM_ROOT` can point this elsewhere for isolation.
 
+Order matters: bring the stack **down before** deleting `.deployctl-sim`. The container bind-mounts `.deployctl-sim/logs`, so removing that directory while the stack is up leaves a stale mount. Then bring the stack back up (Docker recreates the directory) before deploying again.
+
 ## What the demo proves (and does not)
 
 Proves:

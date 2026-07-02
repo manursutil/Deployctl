@@ -218,6 +218,8 @@ docker compose -f docker-compose.sim.yml up -d --build
 node --import tsx src/cli.ts tenants list --env staging --tenants tenants.sim.yml
 node --import tsx src/cli.ts deploy backend --tenant client1 --env staging --ref main --config deployctl.sim.config.yml --tenants tenants.sim.yml
 node --import tsx src/cli.ts status --tenant client1 --env staging --config deployctl.sim.config.yml --tenants tenants.sim.yml
+# Two frontend versions so rollback has an earlier one to restore:
+node --import tsx src/cli.ts deploy frontend --tenant client1 --env staging --ref 79677ebd968e907fca2b2b348ac61116d86fb5a3 --config deployctl.sim.config.yml --tenants tenants.sim.yml
 node --import tsx src/cli.ts deploy frontend --tenant client1 --env staging --ref main --config deployctl.sim.config.yml --tenants tenants.sim.yml
 node --import tsx src/cli.ts rollback frontend --tenant client1 --env staging --config deployctl.sim.config.yml --tenants tenants.sim.yml
 node --import tsx src/cli.ts logs --tenant client1 --env staging --service api --since 1h --config deployctl.sim.config.yml --tenants tenants.sim.yml
