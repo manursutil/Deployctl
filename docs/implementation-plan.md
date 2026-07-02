@@ -86,6 +86,8 @@ Status: `Not started`
 
 Goal: confirm infrastructure assumptions before concrete AWS-facing implementation.
 
+Interim demo path: `docs/phase-0-simulation-plan.md` defines a Docker-based simulation lane so the deployment model can be demonstrated and the remaining adapters can be developed without waiting for real Phase 0 answers. That simulation does not mark Phase 0 tasks as confirmed; real cutover work is tracked in `docs/phase-0-real-cutover.md`.
+
 Work this phase from `docs/phase-0-checklist.md`, which restates the tasks below as concrete questions grouped by the AWS adapter each answer unblocks. Every orchestration module is already implemented behind a seam, so Phase 0 is the remaining gate for AWS-facing execution.
 
 Record each confirmed answer in `CONTEXT.md` (and update the relevant section of `docs/initial-architecture-proposal.md` when an answer changes a documented assumption). A task is not "confirmed" until its answer is written down there.
@@ -438,6 +440,8 @@ Current docs:
 - `docs/implementation-plan-detailed.md`
 - `docs/presentation-qa.md`
 - `docs/phase-0-checklist.md`
+- `docs/phase-0-simulation-plan.md`
+- `docs/phase-0-real-cutover.md`
 - `CONTEXT.md`
 
 Completed:
@@ -445,6 +449,7 @@ Completed:
 - Added agent guidance requiring `docs/implementation-plan.md` to be updated with implementation progress.
 - Added PR-sized work guidance for features, bug fixes, behavior changes, and operational changes.
 - Added presentation Q&A covering architecture, scope, security, failure modes, rollback, observability, and known Phase 0 gaps.
+- Added a Docker simulation plan for demoing the deploy model before real Phase 0 answers, plus a real cutover checklist for replacing simulated adapters and values.
 
 Future docs:
 

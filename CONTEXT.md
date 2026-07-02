@@ -25,6 +25,8 @@ Current files:
 - `docs/initial-architecture-proposal.md`: primary architecture proposal and decisions.
 - `docs/implementation-plan.md`: phased implementation tracker and current phase status.
 - `docs/phase-0-checklist.md`: working checklist of Phase 0 infrastructure confirmations, grouped by the AWS adapter each answer unblocks.
+- `docs/phase-0-simulation-plan.md`: Docker-based simulation plan for demoing deploy, rollback, status, logs, and replacement-instance behavior before real Phase 0 answers are available.
+- `docs/phase-0-real-cutover.md`: checklist for replacing simulation values/adapters with confirmed AWS/EC2/CloudWatch/Secrets/IAM facts once Phase 0 is complete.
 - `docs/multi-tenant-deployment-explainer.md`: beginner-friendly explanation of the no-Docker deployment model.
 - `package.json`, `package-lock.json`, `tsconfig.json`: TypeScript CLI package scaffold.
 - `deployctl.config.yml`: initial project config with placeholder operational values.
@@ -265,6 +267,8 @@ Current paths:
 - `package.json`, `package-lock.json`, `tsconfig.json`: Node package metadata and TypeScript configuration.
 - `deployctl.config.yml`: project-wide config for AWS region, app repository, build commands, deploy history/artifact locations, ref policies, and retention settings. Some values are placeholders until Phase 0 discovery confirms them.
 - `tenants.yml`: tenant registry with environment/tenant resource mappings. Current values are starter references and should be confirmed before real deploy use.
+- `docs/phase-0-simulation-plan.md`: plan for a local Docker Compose lab using simulated adapters behind the same core seams.
+- `docs/phase-0-real-cutover.md`: replacement checklist for moving from simulation to real AWS adapters and confirmed Phase 0 values.
 
 Proposed paths from the architecture, not yet created (see the target repo structure in `docs/implementation-plan.md`):
 
@@ -322,6 +326,7 @@ Repository gaps:
 - No Bitbucket pipeline config exists yet.
 - No deploy history schemas exist yet.
 - No IAM policies exist yet.
+- No Docker simulation lab exists yet; the intended demo path is specified in `docs/phase-0-simulation-plan.md`.
 
 Architecture and implementation open questions (tracked as a working checklist in `docs/phase-0-checklist.md`, grouped by the AWS adapter each answer unblocks):
 
@@ -346,6 +351,10 @@ Intentional version 1 non-goals:
 - No database migration automation.
 - No dashboard rollback or logs support in the first dashboard phase (deferred, see Phase 15 in `docs/implementation-plan.md`).
 - No DynamoDB or S3 lock store for the dashboard guardrail; see Phase 5 in `docs/implementation-plan.md`.
+
+Simulation note:
+
+- Docker may be used as a temporary demo/development lab for Phase 0 assumptions, but it is not the production deployment architecture and does not confirm real infrastructure facts. Simulated values must remain clearly separated from `deployctl.config.yml` and `tenants.yml` until replaced through `docs/phase-0-real-cutover.md`.
 
 ## Security Notes
 
