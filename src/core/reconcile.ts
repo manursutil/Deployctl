@@ -1,13 +1,13 @@
 import { DeployctlError, formatError } from "../shared.js";
 import type { DeployctlConfig } from "./config.js";
 import type { SsmDeployExecutor } from "./deploy.js";
-import { clearDeploymentGuardrail, startDeploymentGuardrail } from "./guardrail.js";
 import {
   type DeployEventStatus,
   type DeployHistoryRepository,
   type DeployInstanceResult,
   type DeployTarget,
 } from "./history.js";
+import { runDeployLifecycle } from "./lifecycle.js";
 import { getTenantConfig, type TenantRegistry } from "./tenants.js";
 
 export type ReconcileBackendInput = {
@@ -59,34 +59,34 @@ export async function reconcileBackend(input: ReconcileBackendInput): Promise<Re
   }
 
   const currentVersion = current.currentVersion;
-  const startedAt = clock();
-  const eventId = (input.generateEventId ?? formatReconcileEventId)(startedAt);
 
-  await startDeploymentGuardrail(input.history, target, { eventId, since: startedAt.toISOString(), actor: input.actor });
+  const lifecycle = await runDeployLifecycle({
+    target,
+    actor: input.actor,
+    history: input.history,
+    clock,
+    generateEventId: input.generateEventId ?? formatReconcileEventId,
+    work: async () => {
+      const outcome = await input.executor.runBackendDeploy({
+        target,
+        resolvedCommit: currentVersion,
+        tenant,
+        ssmTarget,
+        build: input.config.build.backend,
+        applicationRepositoryUrl: input.config.applicationRepository.url,
+      });
 
-  try {
-    const outcome = await input.executor.runBackendDeploy({
-      target,
-      resolvedCommit: currentVersion,
-      tenant,
-      ssmTarget,
-      build: input.config.build.backend,
-      applicationRepositoryUrl: input.config.applicationRepository.url,
-    });
+      return {
+        status: overallStatus(outcome.instances),
+        currentVersion,
+        ssmCommandId: outcome.ssmCommandId,
+        instances: outcome.instances,
+      };
+    },
+    errorMessage: (error) => `Backend reconcile failed for ${target.env}/${target.tenant}: ${formatError(error)}`,
+  });
 
-    return {
-      status: overallStatus(outcome.instances),
-      currentVersion,
-      ssmCommandId: outcome.ssmCommandId,
-      instances: outcome.instances,
-    };
-  } catch (error) {
-    throw error instanceof DeployctlError
-      ? error
-      : new DeployctlError(`Backend reconcile failed for ${target.env}/${target.tenant}: ${formatError(error)}`);
-  } finally {
-    await clearDeploymentGuardrail(input.history, target, eventId);
-  }
+  return lifecycle.result;
 }
 
 /** Deterministic `rec_YYYYMMDD_HHMMSS` guardrail id for a reconcile run. */
