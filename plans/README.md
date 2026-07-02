@@ -13,7 +13,7 @@ Planned against commit `a001b1b` on `main`.
 | [003](003-verify-direct-commit-shas.md) | Verify direct commit SHA refs against the configured repository | P2 | S/M | — | DONE |
 | [004](004-enforce-frontend-build-identity-inputs.md) | Enforce configured frontend build identity inputs | P2 | S | — | DONE |
 | [005](005-add-git-adapter-tests.md) | Add focused tests for the Git CLI adapter boundary | P3 | S | 003 | DONE |
-| [006](006-deepen-deploy-lifecycle-module.md) | Deepen the deploy lifecycle module | P2 | M | — | TODO |
+| [006](006-deepen-deploy-lifecycle-module.md) | Deepen the deploy lifecycle module | P2 | M | — | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale — finding fixed independently or approach abandoned)
 

@@ -1,7 +1,6 @@
 import { DeployctlError, formatError } from "../shared.js";
 import type { DeployctlConfig, SsmTargetSelector } from "./config.js";
 import {
-  applySuccessfulEventToCurrentState,
   formatDeployEventId,
   newDeployEvent,
   type DeployEvent,
@@ -10,7 +9,7 @@ import {
   type DeployInstanceResult,
   type DeployTarget,
 } from "./history.js";
-import { clearDeploymentGuardrail, startDeploymentGuardrail } from "./guardrail.js";
+import { runDeployLifecycle } from "./lifecycle.js";
 import { resolveDeploymentRef, type RefResolver } from "./refs.js";
 import { getTenantConfig, type TenantConfig, type TenantRegistry } from "./tenants.js";
 
@@ -86,20 +85,14 @@ export async function deployBackend(input: DeployBackendInput): Promise<DeployBa
     resolver: input.refResolver,
   });
 
-  const startedAt = clock();
-  const eventId = (input.generateEventId ?? formatDeployEventId)(startedAt);
-
-  await startDeploymentGuardrail(input.history, target, {
-    eventId,
-    since: startedAt.toISOString(),
+  const lifecycle = await runDeployLifecycle({
+    target,
     actor: input.actor,
-  });
-
-  try {
-    let outcome: SsmBackendDeployOutcome;
-
-    try {
-      outcome = await input.executor.runBackendDeploy({
+    history: input.history,
+    clock,
+    generateEventId: input.generateEventId ?? formatDeployEventId,
+    work: async () => {
+      const outcome = await input.executor.runBackendDeploy({
         target,
         resolvedCommit: resolved.resolvedCommit,
         tenant,
@@ -107,48 +100,40 @@ export async function deployBackend(input: DeployBackendInput): Promise<DeployBa
         build: input.config.build.backend,
         applicationRepositoryUrl: input.config.applicationRepository.url,
       });
-    } catch (error) {
-      const event = newDeployEvent({
-        target,
-        eventId,
-        requestedRef: resolved.requestedRef,
-        resolvedCommit: resolved.resolvedCommit,
-        actor: input.actor,
-        status: "failure",
-        startedAt,
-        finishedAt: clock(),
-        errorMessage: formatError(error),
-      });
-      await input.history.appendEvent(event);
-      throw error instanceof DeployctlError
-        ? error
-        : new DeployctlError(`Backend deploy failed for ${target.env}/${target.tenant}: ${formatError(error)}`);
-    }
+      return { outcome, status: overallStatus(outcome.instances) };
+    },
+    record: {
+      updateCurrentStateOnSuccess: true,
+      success: ({ outcome, status }, context) =>
+        newDeployEvent({
+          target,
+          eventId: context.eventId,
+          requestedRef: resolved.requestedRef,
+          resolvedCommit: resolved.resolvedCommit,
+          actor: input.actor,
+          status,
+          startedAt: context.startedAt,
+          finishedAt: context.finishedAt,
+          ssmCommandId: outcome.ssmCommandId,
+          instances: outcome.instances,
+        }),
+      failure: (error, context) =>
+        newDeployEvent({
+          target,
+          eventId: context.eventId,
+          requestedRef: resolved.requestedRef,
+          resolvedCommit: resolved.resolvedCommit,
+          actor: input.actor,
+          status: "failure",
+          startedAt: context.startedAt,
+          finishedAt: context.finishedAt,
+          errorMessage: formatError(error),
+        }),
+    },
+    errorMessage: (error) => `Backend deploy failed for ${target.env}/${target.tenant}: ${formatError(error)}`,
+  });
 
-    const status = overallStatus(outcome.instances);
-    const event = newDeployEvent({
-      target,
-      eventId,
-      requestedRef: resolved.requestedRef,
-      resolvedCommit: resolved.resolvedCommit,
-      actor: input.actor,
-      status,
-      startedAt,
-      finishedAt: clock(),
-      ssmCommandId: outcome.ssmCommandId,
-      instances: outcome.instances,
-    });
-
-    await input.history.appendEvent(event);
-
-    if (status === "success") {
-      await input.history.updateCurrentState(applySuccessfulEventToCurrentState(event));
-    }
-
-    return { status, event };
-  } finally {
-    await clearDeploymentGuardrail(input.history, target, eventId);
-  }
+  return { status: lifecycle.result.status, event: lifecycle.event };
 }
 
 function overallStatus(instances: DeployInstanceResult[]): DeployEventStatus {
@@ -162,4 +147,3 @@ function overallStatus(instances: DeployInstanceResult[]): DeployEventStatus {
 
   return "partial_failure";
 }
-
