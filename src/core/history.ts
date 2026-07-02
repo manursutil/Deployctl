@@ -22,6 +22,8 @@ export type DeployEvent = DeployTarget & {
   ssmCommandId?: string;
   instances?: DeployInstanceResult[];
   errorMessage?: string;
+  /** Frontend only: the S3 key of the artifact that was synced, so a rollback can redeploy the exact artifact. */
+  artifactStorageKey?: string;
 };
 
 export type RollbackEvent = DeployTarget & {
@@ -36,6 +38,8 @@ export type RollbackEvent = DeployTarget & {
   ssmCommandId?: string;
   instances?: DeployInstanceResult[];
   errorMessage?: string;
+  /** Frontend only: the S3 key of the artifact that was re-synced during the rollback. */
+  artifactStorageKey?: string;
 };
 
 export type DeployHistoryEvent = DeployEvent | RollbackEvent;
@@ -93,6 +97,9 @@ export function validateDeployEvent(value: unknown): DeployEvent {
   optionalString(object.errorMessage, "deploy event.errorMessage", (value) => {
     event.errorMessage = value;
   });
+  optionalString(object.artifactStorageKey, "deploy event.artifactStorageKey", (value) => {
+    event.artifactStorageKey = value;
+  });
   optionalInstances(object.instances, "deploy event.instances", (instances) => {
     event.instances = instances;
   });
@@ -121,6 +128,9 @@ export function validateRollbackEvent(value: unknown): RollbackEvent {
   });
   optionalString(object.errorMessage, "rollback event.errorMessage", (value) => {
     event.errorMessage = value;
+  });
+  optionalString(object.artifactStorageKey, "rollback event.artifactStorageKey", (value) => {
+    event.artifactStorageKey = value;
   });
   optionalInstances(object.instances, "rollback event.instances", (instances) => {
     event.instances = instances;
@@ -188,6 +198,7 @@ export function newDeployEvent(input: {
   ssmCommandId?: string;
   instances?: DeployInstanceResult[];
   errorMessage?: string;
+  artifactStorageKey?: string;
 }): DeployEvent {
   const event: DeployEvent = {
     ...input.target,
@@ -210,28 +221,84 @@ export function newDeployEvent(input: {
   if (input.errorMessage !== undefined) {
     event.errorMessage = input.errorMessage;
   }
+  if (input.artifactStorageKey !== undefined) {
+    event.artifactStorageKey = input.artifactStorageKey;
+  }
+
+  return event;
+}
+
+/** Build a rollback event from orchestration inputs. Shared by backend and frontend rollbacks. */
+export function newRollbackEvent(input: {
+  target: DeployTarget;
+  eventId: string;
+  targetVersion: string;
+  previousVersion: string;
+  actor: string;
+  status: RollbackEventStatus;
+  startedAt: Date;
+  finishedAt: Date;
+  ssmCommandId?: string;
+  instances?: DeployInstanceResult[];
+  errorMessage?: string;
+  artifactStorageKey?: string;
+}): RollbackEvent {
+  const event: RollbackEvent = {
+    ...input.target,
+    eventId: input.eventId,
+    type: "rollback",
+    targetVersion: input.targetVersion,
+    previousVersion: input.previousVersion,
+    status: input.status,
+    startedAt: input.startedAt.toISOString(),
+    finishedAt: input.finishedAt.toISOString(),
+    actor: input.actor,
+  };
+
+  if (input.ssmCommandId !== undefined) {
+    event.ssmCommandId = input.ssmCommandId;
+  }
+  if (input.instances !== undefined) {
+    event.instances = input.instances;
+  }
+  if (input.errorMessage !== undefined) {
+    event.errorMessage = input.errorMessage;
+  }
+  if (input.artifactStorageKey !== undefined) {
+    event.artifactStorageKey = input.artifactStorageKey;
+  }
 
   return event;
 }
 
 /** Deterministic `dep_YYYYMMDD_HHMMSS` event id from a start time. */
 export function formatDeployEventId(startedAt: Date): string {
-  const iso = startedAt.toISOString();
-  return `dep_${iso.slice(0, 10).replace(/-/g, "")}_${iso.slice(11, 19).replace(/:/g, "")}`;
+  return `dep_${compactTimestamp(startedAt)}`;
+}
+
+/** Deterministic `rbk_YYYYMMDD_HHMMSS` rollback event id from a start time. */
+export function formatRollbackEventId(startedAt: Date): string {
+  return `rbk_${compactTimestamp(startedAt)}`;
+}
+
+function compactTimestamp(at: Date): string {
+  const iso = at.toISOString();
+  return `${iso.slice(0, 10).replace(/-/g, "")}_${iso.slice(11, 19).replace(/:/g, "")}`;
+}
+
+/** The version a history event established: the resolved commit for a deploy, the target version for a rollback. */
+export function eventVersion(event: DeployHistoryEvent): string {
+  return event.type === "deploy" ? event.resolvedCommit : event.targetVersion;
 }
 
 export async function previousSuccessfulVersion(repository: DeployHistoryRepository, target: DeployTarget): Promise<string | undefined> {
   const current = await repository.readCurrentState(target);
   const events = await repository.listEvents(target);
   const successfulVersions = events
-    .filter((event) => event.status === "success")
-    .map((event) => ({
-      eventId: event.eventId,
-      version: event.type === "deploy" ? event.resolvedCommit : event.targetVersion,
-    }))
-    .filter((event) => event.eventId !== current?.lastSuccessfulEventId);
+    .filter((event) => event.status === "success" && event.eventId !== current?.lastSuccessfulEventId)
+    .map(eventVersion);
 
-  return successfulVersions.at(-1)?.version;
+  return successfulVersions.at(-1);
 }
 
 export class InMemoryDeployHistoryRepository implements DeployHistoryRepository {
