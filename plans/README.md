@@ -8,11 +8,11 @@ Planned against commit `a001b1b` on `main`.
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |---|---|---:|---:|---|---|
-| [001](001-record-frontend-smoke-check-exceptions.md) | Record frontend smoke-check exceptions as deploy failure events | P1 | S | — | TODO |
+| [001](001-record-frontend-smoke-check-exceptions.md) | Record frontend smoke-check exceptions as deploy failure events | P1 | S | — | DONE |
 | [002](002-make-deployment-guardrail-atomic.md) | Make deployment guardrail acquisition atomic | P1 | M | — | DONE |
-| [003](003-verify-direct-commit-shas.md) | Verify direct commit SHA refs against the configured repository | P2 | S/M | — | TODO |
+| [003](003-verify-direct-commit-shas.md) | Verify direct commit SHA refs against the configured repository | P2 | S/M | — | DONE |
 | [004](004-enforce-frontend-build-identity-inputs.md) | Enforce configured frontend build identity inputs | P2 | S | — | DONE |
-| [005](005-add-git-adapter-tests.md) | Add focused tests for the Git CLI adapter boundary | P3 | S | 003 if executed first | TODO |
+| [005](005-add-git-adapter-tests.md) | Add focused tests for the Git CLI adapter boundary | P3 | S | 003 | DONE |
 
 Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJECTED (with one-line rationale — finding fixed independently or approach abandoned)
 
@@ -20,7 +20,7 @@ Status values: TODO | IN PROGRESS | DONE | BLOCKED (with one-line reason) | REJE
 
 - Plans 001, 002, 003, and 004 are independent and can be executed separately.
 - Plan 002 should land before any real S3-backed history/current-state adapter or executable deploy command relies on the guardrail in production.
-- Plan 003 and Plan 005 overlap in `src/adapters/git.ts` and `test/git.test.ts`. If Plan 003 is executed first and includes comprehensive Git adapter tests, Plan 005 may be partially complete or should be marked `REJECTED` with a note that Plan 003 covered it.
+- Plan 003 and Plan 005 were executed together in `src/adapters/git.ts` and `test/git.test.ts`: Plan 003 added the full-SHA verification and the injectable `GitCommandRunner` seam, and Plan 005's adapter-boundary tests were completed in the same `test/git.test.ts` rather than duplicated. Both are `DONE`.
 - Plan 004 should land before wiring the real frontend build adapter, so artifact reuse semantics are fixed before real artifacts are created.
 
 ## Verification baseline from audit
