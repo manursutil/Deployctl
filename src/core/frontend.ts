@@ -156,7 +156,6 @@ export async function deployFrontend(input: DeployFrontendInput): Promise<Deploy
   const storageKey = frontendArtifactStorageKey(input.config.frontendArtifacts.prefix, key);
 
   let reused = false;
-  let recordedEvent: DeployEvent | undefined;
   let failureMessage = (error: unknown) =>
     `Frontend deploy failed for ${target.env}/${target.tenant}: ${formatError(error)}`;
 
@@ -192,8 +191,8 @@ export async function deployFrontend(input: DeployFrontendInput): Promise<Deploy
     },
     record: {
       updateCurrentStateOnSuccess: true,
-      success: (result, context) => {
-        recordedEvent = newDeployEvent({
+      success: (result, context) =>
+        newDeployEvent({
           target,
           eventId: context.eventId,
           requestedRef: resolved.requestedRef,
@@ -204,9 +203,7 @@ export async function deployFrontend(input: DeployFrontendInput): Promise<Deploy
           finishedAt: context.finishedAt,
           errorMessage: result.errorMessage,
           artifactStorageKey: storageKey,
-        });
-        return recordedEvent;
-      },
+        }),
       failure: (error, context) =>
         newDeployEvent({
           target,
@@ -224,9 +221,5 @@ export async function deployFrontend(input: DeployFrontendInput): Promise<Deploy
     errorMessage: failureMessage,
   });
 
-  if (recordedEvent === undefined) {
-    throw new DeployctlError(`Frontend deploy failed for ${target.env}/${target.tenant}: missing history event`);
-  }
-
-  return { status: lifecycle.result.status, reused, event: recordedEvent };
+  return { status: lifecycle.result.status, reused, event: lifecycle.event };
 }

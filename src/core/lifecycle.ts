@@ -16,30 +16,59 @@ type DeployLifecycleRecordContext = DeployLifecycleContext & {
   finishedAt: Date;
 };
 
-export type DeployLifecycleInput<WorkResult> = {
+type DeployLifecycleBaseInput<WorkResult> = {
   target: DeployTarget;
   actor: string;
   history: DeployHistoryRepository;
   clock?: () => Date;
   generateEventId: (startedAt: Date) => string;
   work: (context: DeployLifecycleContext) => Promise<WorkResult>;
-  record?: {
-    success: (result: WorkResult, context: DeployLifecycleRecordContext) => DeployHistoryEvent;
-    failure: (error: unknown, context: DeployLifecycleRecordContext) => DeployHistoryEvent;
-    updateCurrentStateOnSuccess: boolean;
-  };
   errorMessage: (error: unknown) => string;
 };
 
-export type DeployLifecycleResult<WorkResult> = {
+export type DeployLifecycleInput<WorkResult, RecordedEvent extends DeployHistoryEvent = DeployHistoryEvent> =
+  DeployLifecycleBaseInput<WorkResult> & {
+  record?: {
+    success: (result: WorkResult, context: DeployLifecycleRecordContext) => RecordedEvent;
+    failure: (error: unknown, context: DeployLifecycleRecordContext) => RecordedEvent;
+    // Keep explicit so a caller can record an audit event without changing desired/current state.
+    updateCurrentStateOnSuccess: boolean;
+  };
+};
+
+export type RecordingDeployLifecycleInput<WorkResult, RecordedEvent extends DeployHistoryEvent> =
+  DeployLifecycleBaseInput<WorkResult> & {
+    record: {
+      success: (result: WorkResult, context: DeployLifecycleRecordContext) => RecordedEvent;
+      failure: (error: unknown, context: DeployLifecycleRecordContext) => RecordedEvent;
+      // Keep explicit so a caller can record an audit event without changing desired/current state.
+      updateCurrentStateOnSuccess: boolean;
+    };
+  };
+
+export type DeployLifecycleResult<WorkResult, RecordedEvent extends DeployHistoryEvent = DeployHistoryEvent> = {
   eventId: string;
   startedAt: Date;
   result: WorkResult;
+  event?: RecordedEvent;
 };
 
+export type RecordingDeployLifecycleResult<WorkResult, RecordedEvent extends DeployHistoryEvent> = {
+  eventId: string;
+  startedAt: Date;
+  result: WorkResult;
+  event: RecordedEvent;
+};
+
+export async function runDeployLifecycle<WorkResult, RecordedEvent extends DeployHistoryEvent>(
+  input: RecordingDeployLifecycleInput<WorkResult, RecordedEvent>,
+): Promise<RecordingDeployLifecycleResult<WorkResult, RecordedEvent>>;
 export async function runDeployLifecycle<WorkResult>(
-  input: DeployLifecycleInput<WorkResult>,
-): Promise<DeployLifecycleResult<WorkResult>> {
+  input: DeployLifecycleBaseInput<WorkResult>,
+): Promise<DeployLifecycleResult<WorkResult>>;
+export async function runDeployLifecycle<WorkResult, RecordedEvent extends DeployHistoryEvent = DeployHistoryEvent>(
+  input: DeployLifecycleInput<WorkResult, RecordedEvent>,
+): Promise<DeployLifecycleResult<WorkResult, RecordedEvent>> {
   const clock = input.clock ?? (() => new Date());
   const startedAt = clock();
   const eventId = input.generateEventId(startedAt);
@@ -61,6 +90,7 @@ export async function runDeployLifecycle<WorkResult>(
       if (input.record.updateCurrentStateOnSuccess && event.status === "success") {
         await input.history.updateCurrentState(applySuccessfulEventToCurrentState(event));
       }
+      return { eventId, startedAt, result, event };
     }
 
     return { eventId, startedAt, result };

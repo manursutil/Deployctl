@@ -114,8 +114,6 @@ export async function rollbackBackend(input: RollbackBackendInput): Promise<Roll
 
   const selection = await selectRollbackTarget(input.history, target, input.toVersion);
 
-  let recordedEvent: RollbackEvent | undefined;
-
   const lifecycle = await runDeployLifecycle({
     target,
     actor: input.actor,
@@ -135,8 +133,8 @@ export async function rollbackBackend(input: RollbackBackendInput): Promise<Roll
     },
     record: {
       updateCurrentStateOnSuccess: true,
-      success: ({ outcome, status }, context) => {
-        recordedEvent = newRollbackEvent({
+      success: ({ outcome, status }, context) =>
+        newRollbackEvent({
           target,
           eventId: context.eventId,
           targetVersion: selection.targetVersion,
@@ -147,9 +145,7 @@ export async function rollbackBackend(input: RollbackBackendInput): Promise<Roll
           finishedAt: context.finishedAt,
           ssmCommandId: outcome.ssmCommandId,
           instances: outcome.instances,
-        });
-        return recordedEvent;
-      },
+        }),
       failure: (error, context) =>
         rollbackFailureEvent({
           target,
@@ -164,11 +160,7 @@ export async function rollbackBackend(input: RollbackBackendInput): Promise<Roll
     errorMessage: (error) => `Backend rollback failed for ${targetLabel(target)}: ${formatError(error)}`,
   });
 
-  if (recordedEvent === undefined) {
-    throw new DeployctlError(`Backend rollback failed for ${targetLabel(target)}: missing history event`);
-  }
-
-  return { status: lifecycle.result.status, event: recordedEvent };
+  return { status: lifecycle.result.status, event: lifecycle.event };
 }
 
 export type RollbackFrontendInput = {
@@ -204,7 +196,6 @@ export async function rollbackFrontend(input: RollbackFrontendInput): Promise<Ro
     throw new DeployctlError(`No recorded frontend artifact for version ${selection.targetVersion} of ${targetLabel(target)}`);
   }
 
-  let recordedEvent: RollbackEvent | undefined;
   let failureMessage = (error: unknown) => `Frontend rollback failed for ${targetLabel(target)}: ${formatError(error)}`;
 
   const lifecycle = await runDeployLifecycle({
@@ -227,8 +218,8 @@ export async function rollbackFrontend(input: RollbackFrontendInput): Promise<Ro
     },
     record: {
       updateCurrentStateOnSuccess: true,
-      success: (result, context) => {
-        recordedEvent = newRollbackEvent({
+      success: (result, context) =>
+        newRollbackEvent({
           target,
           eventId: context.eventId,
           targetVersion: selection.targetVersion,
@@ -239,9 +230,7 @@ export async function rollbackFrontend(input: RollbackFrontendInput): Promise<Ro
           finishedAt: context.finishedAt,
           errorMessage: result.errorMessage,
           artifactStorageKey,
-        });
-        return recordedEvent;
-      },
+        }),
       failure: (error, context) =>
         rollbackFailureEvent({
           target,
@@ -257,11 +246,7 @@ export async function rollbackFrontend(input: RollbackFrontendInput): Promise<Ro
     errorMessage: failureMessage,
   });
 
-  if (recordedEvent === undefined) {
-    throw new DeployctlError(`Frontend rollback failed for ${targetLabel(target)}: missing history event`);
-  }
-
-  return { status: lifecycle.result.status, event: recordedEvent };
+  return { status: lifecycle.result.status, event: lifecycle.event };
 }
 
 function rollbackFailureEvent(input: {

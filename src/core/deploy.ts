@@ -85,8 +85,6 @@ export async function deployBackend(input: DeployBackendInput): Promise<DeployBa
     resolver: input.refResolver,
   });
 
-  let recordedEvent: DeployEvent | undefined;
-
   const lifecycle = await runDeployLifecycle({
     target,
     actor: input.actor,
@@ -106,8 +104,8 @@ export async function deployBackend(input: DeployBackendInput): Promise<DeployBa
     },
     record: {
       updateCurrentStateOnSuccess: true,
-      success: ({ outcome, status }, context) => {
-        recordedEvent = newDeployEvent({
+      success: ({ outcome, status }, context) =>
+        newDeployEvent({
           target,
           eventId: context.eventId,
           requestedRef: resolved.requestedRef,
@@ -118,9 +116,7 @@ export async function deployBackend(input: DeployBackendInput): Promise<DeployBa
           finishedAt: context.finishedAt,
           ssmCommandId: outcome.ssmCommandId,
           instances: outcome.instances,
-        });
-        return recordedEvent;
-      },
+        }),
       failure: (error, context) =>
         newDeployEvent({
           target,
@@ -137,11 +133,7 @@ export async function deployBackend(input: DeployBackendInput): Promise<DeployBa
     errorMessage: (error) => `Backend deploy failed for ${target.env}/${target.tenant}: ${formatError(error)}`,
   });
 
-  if (recordedEvent === undefined) {
-    throw new DeployctlError(`Backend deploy failed for ${target.env}/${target.tenant}: missing history event`);
-  }
-
-  return { status: lifecycle.result.status, event: recordedEvent };
+  return { status: lifecycle.result.status, event: lifecycle.event };
 }
 
 function overallStatus(instances: DeployInstanceResult[]): DeployEventStatus {
