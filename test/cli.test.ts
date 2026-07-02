@@ -9,6 +9,18 @@ import { applySuccessfulEventToCurrentState } from "../src/core/history.js";
 
 const cliPath = join(process.cwd(), "src/cli.ts");
 
+// Sim CLI deploys derive their event id from the wall-clock second
+// (dep_YYYYMMDD_HHMMSS) and there is no id injection point through the public CLI.
+// Two deploys to the same target within one second would collide on the append-only
+// event id, so tests that deploy the same target twice must cross a second boundary
+// first. Manual demo use never hits this; back-to-back automated deploys do.
+async function waitForNextEventIdSecond(): Promise<void> {
+  const startSecond = new Date().toISOString().slice(0, 19);
+  while (new Date().toISOString().slice(0, 19) === startSecond) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
 const simTenantsYaml = `staging:
   client1:
     frontendBucket: skincair-staging-frontend-client1
@@ -230,6 +242,7 @@ test("deployctl deploy frontend builds and stores an artifact when adapterMode i
   const bucketFile = join(simRoot, "frontend-buckets", "skincair-staging-frontend-client1", "index.html");
   assert.match(await readFile(bucketFile, "utf8"), /client1/);
 
+  await waitForNextEventIdSecond();
   const second = spawnSync(
     process.execPath,
     ["--import", "tsx", cliPath, "deploy", "frontend", "--tenant", "client1", "--env", "staging", "--ref", "main", "--config", configPath, "--tenants", tenantsPath],
@@ -237,6 +250,48 @@ test("deployctl deploy frontend builds and stores an artifact when adapterMode i
   );
   assert.equal(second.status, 0, second.stderr);
   assert.match(second.stdout, /reused artifact/);
+});
+
+test("deployctl rollback frontend re-syncs the previous artifact without rebuilding when adapterMode is sim", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "deployctl-sim-rollback-frontend-"));
+  const configPath = await writeSimConfig(dir);
+  const tenantsPath = join(dir, "tenants.yml");
+  await writeFile(tenantsPath, simTenantsYaml);
+  const simRoot = join(dir, ".deployctl-sim");
+  const env = { ...process.env, DEPLOYCTL_SIM_ROOT: simRoot };
+  const bucketFile = join(simRoot, "frontend-buckets", "skincair-staging-frontend-client1", "index.html");
+
+  // A stable advertised commit (the phase-1-cli-foundation milestone branch tip)
+  // stands in for an "older release"; main's current tip stands in for the newer one
+  // being rolled back. GitCliRefResolver only accepts a full SHA the repo advertises,
+  // so this must be an advertised ref tip, not an arbitrary/unreachable commit.
+  const olderCommit = "79677ebd968e907fca2b2b348ac61116d86fb5a3";
+
+  const older = spawnSync(
+    process.execPath,
+    ["--import", "tsx", cliPath, "deploy", "frontend", "--tenant", "client1", "--env", "staging", "--ref", olderCommit, "--config", configPath, "--tenants", tenantsPath],
+    { encoding: "utf8", env },
+  );
+  assert.equal(older.status, 0, older.stderr);
+
+  await waitForNextEventIdSecond();
+  const newer = spawnSync(
+    process.execPath,
+    ["--import", "tsx", cliPath, "deploy", "frontend", "--tenant", "client1", "--env", "staging", "--ref", "main", "--config", configPath, "--tenants", tenantsPath],
+    { encoding: "utf8", env },
+  );
+  assert.equal(newer.status, 0, newer.stderr);
+  assert.match(await readFile(bucketFile, "utf8"), /VITE_TENANT=client1/);
+
+  const rollback = spawnSync(
+    process.execPath,
+    ["--import", "tsx", cliPath, "rollback", "frontend", "--tenant", "client1", "--env", "staging", "--config", configPath, "--tenants", tenantsPath],
+    { encoding: "utf8", env },
+  );
+
+  assert.equal(rollback.status, 0, rollback.stderr);
+  assert.match(rollback.stdout, new RegExp(`now at ${olderCommit}`));
+  assert.match(await readFile(bucketFile, "utf8"), new RegExp(olderCommit));
 });
 
 test("deployctl deploy backend requires --ref", () => {
