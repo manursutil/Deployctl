@@ -274,6 +274,28 @@ test("deployctl logs reads simulated log entries filtered by service and since w
   assert.doesNotMatch(result.stdout, /worker recent/);
 });
 
+test("deployctl reconcile backend rejects an unknown tenant before any AWS work", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "src/cli.ts", "reconcile", "backend", "--tenant", "ghost", "--env", "staging"],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Tenant not found in staging: ghost/);
+});
+
+test("deployctl reconcile backend reports the pending boundary under the default aws adapter mode", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "src/cli.ts", "reconcile", "backend", "--tenant", "client1", "--env", "staging"],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /not yet executable/);
+});
+
 test("deployctl deploy frontend builds and stores an artifact when adapterMode is sim, then reuses it on repeat", async () => {
   const dir = await mkdtemp(join(tmpdir(), "deployctl-sim-deploy-frontend-"));
   const configPath = await writeSimConfig(dir);
