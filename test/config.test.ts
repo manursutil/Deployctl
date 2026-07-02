@@ -114,3 +114,24 @@ test("parseDeployctlConfig rejects missing required config", () => {
     (error) => error instanceof DeployctlError && /applicationRepository must be an object/.test(error.message),
   );
 });
+
+test("parseDeployctlConfig defaults adapterMode to aws when omitted", () => {
+  const config = parseDeployctlConfig(baseConfigObject());
+
+  assert.equal(config.adapterMode, "aws");
+});
+
+test("parseDeployctlConfig accepts an explicit sim adapterMode", () => {
+  const value = { ...baseConfigObject(), adapterMode: "sim" };
+
+  assert.equal(parseDeployctlConfig(value).adapterMode, "sim");
+});
+
+test("parseDeployctlConfig rejects an unknown adapterMode", () => {
+  const value = { ...baseConfigObject(), adapterMode: "gcp" };
+
+  assert.throws(
+    () => parseDeployctlConfig(value),
+    (error) => error instanceof DeployctlError && /adapterMode must be "aws" or "sim"/.test(error.message),
+  );
+});

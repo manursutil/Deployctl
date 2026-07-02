@@ -1,5 +1,7 @@
 #!/usr/bin/env node
+import { FileSystemDeployHistoryRepository } from "./adapters/filesystem-history.js";
 import { loadDeployctlConfig } from "./core/config.js";
+import { formatTenantStatus, getTenantStatus } from "./core/diagnostics.js";
 import { getTenantConfig, listTenants, loadTenantRegistry } from "./core/tenants.js";
 import { DeployctlError, formatError, type Io } from "./shared.js";
 
@@ -87,12 +89,24 @@ async function runStatus(args: string[], io: Io): Promise<number> {
   const tenant = requiredOption(args, "--tenant");
   const environment = requiredOption(args, "--env");
 
+  const config = await loadDeployctlConfig(optionValue(args, "--config") ?? "deployctl.config.yml");
   const registry = await loadTenantRegistry(optionValue(args, "--tenants") ?? "tenants.yml");
 
   // Validate the tenant/env offline before reporting the pending boundary.
   getTenantConfig(registry, environment, tenant);
 
   io.stdout.write(`Validated status query for ${environment}/${tenant}.\n`);
+
+  // Sim Phase 1 (docs/phase-0-simulation-plan.md): adapterMode: sim reads current
+  // state from the filesystem history repository instead of the pending S3 adapter.
+  if (config.adapterMode === "sim") {
+    // DEPLOYCTL_SIM_ROOT lets tests and demo scripts isolate simulation state;
+    // it defaults to .deployctl-sim in the current working directory.
+    const repository = new FileSystemDeployHistoryRepository(process.env.DEPLOYCTL_SIM_ROOT);
+    const status = await getTenantStatus(repository, { env: environment, tenant });
+    io.stdout.write(formatTenantStatus(status));
+    return 0;
+  }
 
   // getTenantStatus is implemented and unit-tested behind the DeployHistoryRepository
   // seam, but the S3-backed repository adapter that reads real current.json records is
