@@ -273,11 +273,17 @@ Covered by `test/filesystem-frontend.test.ts`, `test/fixture-frontend.test.ts`, 
 
 ### Sim Phase 4: Logs And Diagnostics
 
-Note: this is more than an adapter. `deployctl logs` has no core and no seam yet — `src/core/diagnostics.ts` implements `getTenantStatus` but no logs query, and `logs` is not dispatched in `src/cli.ts` (Phase 9 checkbox unchecked). This phase includes net-new Phase 9 core work.
+Status: `Done`
 
-- Define the CloudWatch logs query seam in `core/` (env/tenant/service/time-range filter) and the `deployctl logs` controller.
-- Add a filesystem logs adapter behind that seam, reading `.deployctl-sim/logs/<env>/<tenant>/<service>.log`.
-- Add API/worker log fixtures written by the app-server container.
+Note: this was more than an adapter. `deployctl logs` had no core and no seam — this phase added net-new Phase 9 core work.
+
+- [x] Define the logs query seam in `core/` (env/tenant/service/time-range filter) and the `deployctl logs` controller.
+- [x] Add a filesystem logs adapter behind that seam, reading `.deployctl-sim/logs/<env>/<tenant>/<service>.log`.
+- [x] Add API/worker log fixtures written by the app-server container.
+
+Completed: `src/core/logs.ts` defines the `LogQuery` seam (given an absolute `since` cutoff, mirroring CloudWatch `startTime`) plus `getTenantLogs` (parses the `--since` duration, queries, returns oldest-first), `parseSinceDuration`, `parseLogService`, and `formatLogEntries`. `src/adapters/filesystem-logs.ts` (`FileSystemLogQuery`) reads newline-delimited JSON entries from `.deployctl-sim/logs/<env>/<tenant>/<service>.log`, selecting env/tenant/service by path and filtering by the cutoff. `deployctl logs --tenant <t> --env <e> --service <api|worker> --since <dur>` (`src/cli.ts`) runs the query when `adapterMode: sim`, else reports the pending CloudWatch boundary. Log fixtures are written by the container: `scripts/ec2/deploy-backend.sh` appends a startup line per service to `$DEPLOYCTL_LOG_ROOT/<env>/<tenant>/<service>.log` (guarded so only the sim executor triggers it — production logs to stdout for CloudWatch), `DockerSimSsmDeployExecutor` passes that root, and `docker-compose.sim.yml` bind-mounts it to the host `.deployctl-sim/logs` so the CLI reads what the deploy wrote.
+
+Covered by `test/logs.test.ts` (duration parsing, service validation, query orchestration, formatting), `test/filesystem-logs.test.ts` (path selection, `since` filtering, missing-file, malformed-line), and sim-mode CLI tests in `test/cli.test.ts`. The container-written fixtures were verified manually (a sim backend deploy then `deployctl logs --service api --since 1h` returns the entry; `--since 1s` returns none). CloudWatch log group/stream naming remains a Phase 0 confirmation; the optional LocalStack CloudWatch variant was not built.
 
 ### Sim Phase 5: Production Replacement Demo
 
