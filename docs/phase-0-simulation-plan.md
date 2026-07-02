@@ -178,6 +178,8 @@ Demo acceptance:
 - The demo can show the problem Phase 10 solves: a replacement instance may not have the current release.
 - If `deployctl reconcile backend` is implemented for the simulation, it prepares missing releases to match current state.
 
+Implemented in Sim Phase 5 (see below): the `production` compose profile runs two app-servers with independent volumes; recreating one with a fresh volume shows the missing-release problem; `deployctl reconcile backend` re-prepares the current release from `current.json`. Reconcile also surfaced the production ref policy (a branch ref like `main` is rejected for production; deploy with a full SHA or tag).
+
 ### F. Repository Access
 
 Use a local fixture Git repository for demo ref resolution if the real application repo is not available.
@@ -287,9 +289,17 @@ Covered by `test/logs.test.ts` (duration parsing, service validation, query orch
 
 ### Sim Phase 5: Production Replacement Demo
 
-- Add multi-container production profile.
-- Demonstrate clean replacement instance behavior.
-- Implement or document simulated reconciliation.
+Status: `Done`
+
+- [x] Add multi-container production profile.
+- [x] Demonstrate clean replacement instance behavior.
+- [x] Implement simulated reconciliation.
+
+Completed: `docker-compose.sim.yml` gains two production app-servers behind a `production` compose profile (default `up` stays staging-only), each with its own `/opt/sherwood` volume so one can be recreated clean to stand in for a replacement ASG instance. `deployctl.sim.config.yml`'s production target is `instanceIds` listing the two container names (real infra is an ASG); `tenants.sim.yml` gains a `production/client1` tenant and the container secret fixtures gain the production secret names. `src/core/reconcile.ts` (`reconcileBackend`) reads the recorded current version from `current.json` and re-runs the same `SsmDeployExecutor` deploy for that commit on every configured instance — resolving no ref, recording no new version, changing no current state — so a replacement container with an empty release root is brought back to the desired version. `deployctl reconcile backend --tenant <t> --env <e>` (`src/cli.ts`) runs it under `adapterMode: sim`, else reports the pending Phase 10 boundary.
+
+Covered by `test/reconcile.test.ts` (current-version read, no-current-version, partial_failure, executor-throw guardrail clearing, in-progress conflict) and CLI tests in `test/cli.test.ts`. The full replacement demo was verified manually: deploy backend to production (both containers get the release), recreate `production-2` with a fresh volume (it lacks the current release — the Phase 10 problem), then `reconcile backend` re-prepares it so both instances match `current.json`. The manual demo commands are captured in the Sim Phase 6 runbook.
+
+Scope: this simulates the Phase 10 mechanism; real ASG reconciliation (resolving healthy ASG instances, real bootstrap behavior) stays blocked on Phase 0 discovery. Reconcile re-runs the deploy on all configured instances rather than diffing per instance first — the server script is idempotent, so an instance already at the current release is unaffected.
 
 ### Sim Phase 6: Demo Runbook
 

@@ -10,6 +10,7 @@ import { deployBackend } from "./core/deploy.js";
 import { formatTenantStatus, getTenantStatus } from "./core/diagnostics.js";
 import { deployFrontend } from "./core/frontend.js";
 import { formatLogEntries, getTenantLogs, parseLogService } from "./core/logs.js";
+import { reconcileBackend } from "./core/reconcile.js";
 import { rollbackBackend, rollbackFrontend } from "./core/rollback.js";
 import { getTenantConfig, listTenants, loadTenantRegistry } from "./core/tenants.js";
 import { DeployctlError, formatError, type Io } from "./shared.js";
@@ -25,6 +26,7 @@ Usage:
   deployctl rollback backend|frontend --tenant <tenant> --env <env> [--version <version>]
   deployctl cleanup releases|artifacts --env <env> [--dry-run]
   deployctl logs --tenant <tenant> --env <env> --service <api|worker> --since <duration>
+  deployctl reconcile backend --tenant <tenant> --env <env>
 
 Options:
   --config <path>  Path to deployctl.config.yml
@@ -85,6 +87,10 @@ export async function runCli(argv: string[], io: Io = { stdout: process.stdout, 
 
     if (args[0] === "logs") {
       return await runLogs(args, io);
+    }
+
+    if (args[0] === "reconcile" && args[1] === "backend") {
+      return await runReconcileBackend(args, io);
     }
 
     if (args[0] === "cleanup") {
@@ -377,6 +383,62 @@ async function runLogs(args: string[], io: Io): Promise<number> {
   // confirmation, so no live logs can be read yet.
   throw new DeployctlError(
     `Logs for ${environment}/${tenant}/${service} are not yet readable: the CloudWatch Logs adapter is pending (Phase 9).`,
+  );
+}
+
+async function runReconcileBackend(args: string[], io: Io): Promise<number> {
+  const tenant = requiredOption(args, "--tenant");
+  const environment = requiredOption(args, "--env");
+
+  const config = await loadDeployctlConfig(optionValue(args, "--config") ?? "deployctl.config.yml");
+  const registry = await loadTenantRegistry(optionValue(args, "--tenants") ?? "tenants.yml");
+
+  // Validate everything resolvable without AWS or network before reporting the
+  // pending boundary, so operators get input errors immediately.
+  getTenantConfig(registry, environment, tenant);
+
+  if (config.ssmTargets[environment] === undefined) {
+    throw new DeployctlError(`No SSM target selector configured for environment: ${environment}`);
+  }
+
+  io.stdout.write(`Validated backend reconcile for ${environment}/${tenant}.\n`);
+
+  // Sim Phase 5 (docs/phase-0-simulation-plan.md): reconcile re-prepares the recorded
+  // current release on every configured instance via the same Docker executor deploy,
+  // bringing a replacement container with an empty /opt/sherwood back to desired state.
+  if (config.adapterMode === "sim") {
+    const result = await reconcileBackend({
+      env: environment,
+      tenant,
+      actor: "cli",
+      config,
+      registry,
+      history: new FileSystemDeployHistoryRepository(process.env.DEPLOYCTL_SIM_ROOT),
+      executor: new DockerSimSsmDeployExecutor({
+        releaseRoot: config.backendDeploy.releaseRoot,
+        osUser: config.backendDeploy.osUser,
+      }),
+    });
+
+    if (result.status !== "success") {
+      throw new DeployctlError(
+        `Backend reconcile ${result.status} for ${environment}/${tenant} (current version ${result.currentVersion}).`,
+      );
+    }
+
+    io.stdout.write(
+      `Backend reconcile succeeded for ${environment}/${tenant}: ${result.instances.length} instance(s) at ${result.currentVersion}.\n`,
+    );
+    return 0;
+  }
+
+  // The orchestration module (reconcileBackend) is implemented and unit-tested behind
+  // the SsmDeployExecutor seam, but the production SSM executor and the S3-backed deploy
+  // history adapter (which supplies the desired version) are still pending Phase 0 infra
+  // confirmation, so no real reconcile runs yet. Real ASG reconciliation is Phase 10,
+  // blocked on Phase 0 ASG bootstrap discovery.
+  throw new DeployctlError(
+    `Backend reconcile for ${environment}/${tenant} is not yet executable: the SSM executor and S3 deploy history adapters are pending (Phase 10).`,
   );
 }
 

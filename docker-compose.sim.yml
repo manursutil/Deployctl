@@ -1,8 +1,22 @@
-# Sim Phase 0-2 Docker lab (docs/phase-0-simulation-plan.md).
+# Sim Phase 0-5 Docker lab (docs/phase-0-simulation-plan.md).
 # Not the production deployment path — see the plan's Non-Goals.
+#
+# Default `up` starts only the single staging app-server. The two production
+# app-servers (Sim Phase 5 replacement demo) are behind the `production` profile:
+#   docker compose -f docker-compose.sim.yml --profile production up -d
+# Each production container has its own volume, so one can be recreated with a
+# fresh /opt/sherwood to simulate a replacement ASG instance.
+x-app-server: &app-server
+  build: ./docker/sim/app-server
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+    interval: 5s
+    timeout: 3s
+    retries: 5
+
 services:
   app-server-staging:
-    build: ./docker/sim/app-server
+    <<: *app-server
     container_name: deployctl-sim-app-server-staging
     volumes:
       - sherwood-staging:/opt/sherwood
@@ -10,11 +24,26 @@ services:
       # Host-visible so `deployctl logs` (which reads .deployctl-sim/logs on the host)
       # can read the api/worker log lines the deploy script writes (Sim Phase 4).
       - ./.deployctl-sim/logs:/opt/deployctl/logs
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
+
+  app-server-production-1:
+    <<: *app-server
+    container_name: deployctl-sim-app-server-production-1
+    profiles: [production]
+    volumes:
+      - sherwood-production-1:/opt/sherwood
+      - ./scripts/ec2:/opt/deployctl/scripts:ro
+      - ./.deployctl-sim/logs:/opt/deployctl/logs
+
+  app-server-production-2:
+    <<: *app-server
+    container_name: deployctl-sim-app-server-production-2
+    profiles: [production]
+    volumes:
+      - sherwood-production-2:/opt/sherwood
+      - ./scripts/ec2:/opt/deployctl/scripts:ro
+      - ./.deployctl-sim/logs:/opt/deployctl/logs
 
 volumes:
   sherwood-staging:
+  sherwood-production-1:
+  sherwood-production-2:
