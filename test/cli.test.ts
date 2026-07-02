@@ -60,6 +60,9 @@ ssmTargets:
   production:
     mode: asg
     autoScalingGroupName: sherwood-prod-asg
+backendDeploy:
+  releaseRoot: /opt/sherwood/releases
+  osUser: sherwood
 retention:
   successfulVersionsPerTarget: 10
   keepDays: 30

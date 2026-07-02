@@ -7,7 +7,10 @@ aws:
   region: eu-west-1
 
 applicationRepository:
-  url: ssh://git@bitbucket.org/example/application-monorepo.git
+  # Points at this very repo so ref resolution (git ls-remote) works with no
+  # extra fixture repo; `main` is a real moving branch. See Sim Phase 2 design
+  # notes in docs/phase-0-simulation-plan.md.
+  url: .
 
 build:
   backend:
@@ -39,11 +42,16 @@ refPolicies:
 ssmTargets:
   staging:
     mode: instanceIds
+    # Reused as Docker container names by DockerSimSsmDeployExecutor (Sim Phase 2).
     instanceIds:
-      - i-0000000000staging0
+      - deployctl-sim-app-server-staging
   production:
     mode: asg
     autoScalingGroupName: sherwood-production-asg
+
+backendDeploy:
+  releaseRoot: /opt/sherwood/releases
+  osUser: sherwood
 
 retention:
   successfulVersionsPerTarget: 10

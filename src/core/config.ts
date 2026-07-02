@@ -22,10 +22,17 @@ export type DeployctlConfig = {
   frontendArtifacts: StorageLocation;
   refPolicies: Record<string, RefPolicy>;
   ssmTargets: Record<string, SsmTargetSelector>;
+  backendDeploy: BackendDeployConfig;
   retention: {
     successfulVersionsPerTarget: number;
     keepDays: number;
   };
+};
+
+/** Project-wide EC2 layout facts the backend deploy script needs, kept out of scripts/ec2/ so real cutover is a config change. */
+type BackendDeployConfig = {
+  releaseRoot: string;
+  osUser: string;
 };
 
 export type SsmTargetSelector =
@@ -96,6 +103,7 @@ export function parseDeployctlConfig(value: unknown, sourceName = "deployctl.con
     frontendArtifacts: storageLocation(root.frontendArtifacts, `${sourceName}.frontendArtifacts`),
     refPolicies: refPolicies(root.refPolicies, `${sourceName}.refPolicies`),
     ssmTargets: ssmTargets(root.ssmTargets, `${sourceName}.ssmTargets`),
+    backendDeploy: backendDeployConfig(root.backendDeploy, `${sourceName}.backendDeploy`),
     retention: {
       successfulVersionsPerTarget: positiveInteger(
         retention.successfulVersionsPerTarget,
@@ -125,6 +133,15 @@ function buildConfig(value: unknown, path: string): BuildConfig {
     packageManager: nonEmptyString(config, `${path}.packageManager`, "packageManager"),
     installCommand: nonEmptyString(config, `${path}.installCommand`, "installCommand"),
     buildCommand: nonEmptyString(config, `${path}.buildCommand`, "buildCommand"),
+  };
+}
+
+function backendDeployConfig(value: unknown, path: string): BackendDeployConfig {
+  const object = objectAt(value, path);
+
+  return {
+    releaseRoot: nonEmptyString(object, `${path}.releaseRoot`, "releaseRoot"),
+    osUser: nonEmptyString(object, `${path}.osUser`, "osUser"),
   };
 }
 

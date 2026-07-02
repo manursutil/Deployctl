@@ -42,6 +42,12 @@ ssmTargets:
     mode: asg
     autoScalingGroupName: sherwood-production-asg
 
+# Assumed EC2 layout for the backend deploy script. Placeholder until Phase 0
+# discovery confirms the real release root and OS user (docs/phase-0-checklist.md A1).
+backendDeploy:
+  releaseRoot: /opt/sherwood/releases
+  osUser: sherwood
+
 retention:
   successfulVersionsPerTarget: 10
   keepDays: 30
