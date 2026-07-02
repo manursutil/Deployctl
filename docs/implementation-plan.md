@@ -328,16 +328,28 @@ Still pending (needs Phase 0 confirmation + real AWS before it can be verified e
 
 ## Phase 9: Logs And Diagnostics
 
-Status: `Not started`
+Status: `In progress`
 
 Goal: expose operational status and CloudWatch logs through the CLI.
 
 Tasks:
 
-- Implement `deployctl status`.
-- Implement `deployctl logs` from CloudWatch Logs.
-- Filter logs by environment, tenant, service, and time range.
-- Show SSM command IDs and per-instance results where relevant.
+- [x] Implement `deployctl status` (core).
+- [ ] Implement `deployctl logs` from CloudWatch Logs.
+- [ ] Filter logs by environment, tenant, service, and time range.
+- [ ] Show SSM command IDs and per-instance results where relevant.
+
+Progress:
+
+- Added `src/core/diagnostics.ts` with `getTenantStatus(...)`: a pure query over the `DeployHistoryRepository` seam that reports current state per `<env>/<tenant>/<app>` (default apps backend + frontend), including the `inProgress` guardrail and marking apps with no record as not deployed. Added `formatTenantStatus(...)` for one-line-per-target CLI rendering.
+- Added the `deployctl status --tenant <t> --env <e>` CLI controller. It validates tenant/env offline (no AWS or network), then fails clearly that live status reads need the S3-backed history adapter.
+- Tests cover current-state reporting, the not-deployed case, the `inProgress` surface, the app filter, and the rendered output (repository mocked in-memory); CLI tests cover unknown-tenant rejection and the pending boundary.
+
+Still pending (needs Phase 0 confirmation + real AWS before it can be verified end to end):
+
+- Wire the S3-backed `DeployHistoryRepository` adapter into the `status` controller so it reads real `current.json` records (shared with Phases 6-7).
+- `deployctl logs`: confirm CloudWatch log group and stream naming (Phase 0), add the CloudWatch Logs adapter, and filter by env/tenant/service/time range.
+- Surface SSM command IDs and per-instance results in status where relevant, once the SSM adapter records them.
 
 Done when: `deployctl status` reports current state per `<env>/<tenant>/<app>` and `deployctl logs` returns filtered CloudWatch entries for a given env/tenant/service, both covered by a test (live AWS calls mocked).
 

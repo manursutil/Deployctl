@@ -51,6 +51,10 @@ export async function runCli(argv: string[], io: Io = { stdout: process.stdout, 
       return 0;
     }
 
+    if (args[0] === "status") {
+      return await runStatus(args, io);
+    }
+
     if (args[0] === "deploy" && args[1] === "backend") {
       return await runDeployBackend(args, io);
     }
@@ -64,6 +68,25 @@ export async function runCli(argv: string[], io: Io = { stdout: process.stdout, 
     io.stderr.write(`${formatError(error)}\n`);
     return error instanceof DeployctlError ? error.exitCode : 1;
   }
+}
+
+async function runStatus(args: string[], io: Io): Promise<number> {
+  const tenant = requiredOption(args, "--tenant");
+  const environment = requiredOption(args, "--env");
+
+  const registry = await loadTenantRegistry(optionValue(args, "--tenants") ?? "tenants.yml");
+
+  // Validate the tenant/env offline before reporting the pending boundary.
+  getTenantConfig(registry, environment, tenant);
+
+  io.stdout.write(`Validated status query for ${environment}/${tenant}.\n`);
+
+  // getTenantStatus is implemented and unit-tested behind the DeployHistoryRepository
+  // seam, but the S3-backed repository adapter that reads real current.json records is
+  // still pending Phase 0 infra confirmation, so no live status can be read yet.
+  throw new DeployctlError(
+    `Status for ${environment}/${tenant} is not yet readable: the S3 deploy history adapter is pending (Phase 4/9).`,
+  );
 }
 
 async function runDeployBackend(args: string[], io: Io): Promise<number> {
