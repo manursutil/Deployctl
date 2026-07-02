@@ -48,6 +48,7 @@ Current files:
 - `src/adapters/filesystem-frontend.ts`: Sim Phase 3 `FileSystemFrontendArtifactStore` (stores artifacts under `.deployctl-sim/artifacts/<storageKey>`) and `FileSystemFrontendSync` (copies to `.deployctl-sim/frontend-buckets/<bucket>/index.html`).
 - `src/adapters/fixture-frontend.ts`: Sim Phase 3 `FixtureFrontendBuilder` (synthesizes an `index.html` embedding commit/env/tenant/build variables, no real build) and `NoopFrontendSmokeCheck` (always healthy; no HTTP server stood up in the sim).
 - `src/adapters/filesystem-logs.ts`: Sim Phase 4 `FileSystemLogQuery` reading newline-delimited JSON entries from `.deployctl-sim/logs/<env>/<tenant>/<service>.log`, filtered by the `since` cutoff.
+- `src/composition.ts`: composition root. `createAdapterProvider(config, runtime)` returns a flat `AdapterProvider` that hands out each port's adapter chosen by `adapterMode` (`sim` → filesystem/Docker/fixture adapters, loaded lazily via dynamic `import()`; `aws` → every port rejects until the real adapters land). `runtimeFromEnv()` reads `DEPLOYCTL_SIM_ROOT` in one place. Both the CLI and the future dashboard call it, so adapter wiring is not duplicated per caller.
 - `src/shared.ts`: shared CLI errors, IO, and formatting helpers.
 - `tenants.yml`: initial tenant registry with resource references only.
 - `deployctl.sim.config.yml`: simulation config (`adapterMode: sim`) for the Docker-based demo lane; values are simulation fixtures, not confirmed Phase 0 facts.
@@ -210,6 +211,7 @@ Implemented patterns:
 - CLI behavior tests should invoke the public CLI entrypoint with `spawnSync`, not private functions.
 - Non-implemented commands should fail clearly without AWS side effects.
 - Keep CLI command controllers thin over directly importable modules. The current public seam is `runCli(argv, io)` in `src/cli.ts`; the config module seam is `loadDeployctlConfig(path)` in `src/core/config.ts`.
+- Construct adapters only through the composition root `createAdapterProvider(config, runtime)` in `src/composition.ts`, never with `new` in a controller. It is the single place that maps `adapterMode` to concrete adapters and the single reader of `DEPLOYCTL_SIM_ROOT` (via `runtimeFromEnv()`). Adapter modules are imported lazily inside the provider so a run loads only the infrastructure it uses. Controllers still own their command-specific pending-boundary message for `adapterMode: aws`; when a real AWS adapter lands it replaces that port in the composition root's `aws` branch.
 - Tenant registry callers should use `loadTenantRegistry(path)` and `listTenants(registry, environment)` from `src/core/tenants.ts` rather than parsing YAML in command code.
 - Ref resolution callers should use `resolveDeploymentRef(input)` from `src/core/refs.ts`. Core enforces environment ref policy and returns both `requestedRef` and immutable `resolvedCommit`; Git access stays behind the `RefResolver` adapter interface. `GitCliRefResolver` accepts a full commit SHA only when the configured repository advertises it (`git ls-remote`), and runs Git through an injectable `GitCommandRunner` seam so the adapter is tested offline (`test/git.test.ts`).
 - History callers should use the `DeployHistoryRepository` seam from `src/core/history.ts`. Append-only events and mutable current state are separate operations; successful deploy/rollback events update current state through `applySuccessfulEventToCurrentState(...)`.
@@ -272,6 +274,7 @@ Current paths:
 - `src/adapters/filesystem-frontend.ts`: `FrontendArtifactStore`/`FrontendSync` adapters used when `adapterMode: sim`.
 - `src/adapters/fixture-frontend.ts`: `FrontendBuilder`/`FrontendSmokeCheck` adapters used when `adapterMode: sim`.
 - `src/adapters/filesystem-logs.ts`: `LogQuery` adapter used when `adapterMode: sim`; reads `.deployctl-sim/logs/<env>/<tenant>/<service>.log`.
+- `src/composition.ts`: composition root (`createAdapterProvider`/`runtimeFromEnv`) selecting adapters by `adapterMode`; the shared wiring for the CLI and the future dashboard.
 - `src/core/reconcile.ts`: `reconcileBackend` over the `SsmDeployExecutor` seam; used by `deployctl reconcile backend` under `adapterMode: sim`.
 - `scripts/ec2/deploy-backend.sh`: EC2-local backend deploy script (real SSM target or the sim container); also emits sim-only api/worker log fixtures when `DEPLOYCTL_LOG_ROOT` is set.
 - `docker-compose.sim.yml`, `docker/sim/app-server/`: Docker "EC2 app-server" lab; a `production` compose profile adds two independent-volume production containers for the Sim Phase 5 replacement demo.
@@ -285,6 +288,7 @@ Current paths:
 - `test/logs.test.ts`: `getTenantLogs`/`parseSinceDuration`/`parseLogService`/`formatLogEntries` behavior (fake `LogQuery` seam).
 - `test/filesystem-logs.test.ts`: `FileSystemLogQuery` behavior tests (path selection, `since` filtering, missing file, malformed line).
 - `test/reconcile.test.ts`: `reconcileBackend` behavior tests (current-version read, no-current-version, partial_failure, executor-throw guardrail clearing, in-progress conflict) with a fake executor.
+- `test/composition.test.ts`: `createAdapterProvider` behavior tests (sim mode wires each concrete adapter; aws mode rejects every port until real adapters land).
 - `test/tenants.test.ts`: tenant registry validation behavior tests.
 - `test/refs.test.ts`: ref resolution policy behavior tests.
 - `test/history.test.ts`: deploy history/current-state behavior tests.

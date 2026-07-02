@@ -28,6 +28,9 @@ src/
     cleanup.ts          #   retention logic                            (Phase 11)
   adapters/             # thin wrappers over AWS SDK + git (mockable in tests)
     ssm.ts  s3.ts  secrets.ts  cloudwatch.ts  git.ts
+  composition.ts        # composition root: createAdapterProvider(config, runtime)
+                        #   picks adapters by adapterMode; sole caller wiring shared
+                        #   by the CLI and the future dashboard
   shared.ts             # output formatting, errors, config types
 scripts/
   ec2/                  # server-local shell run via SSM (proposal §7)
@@ -475,7 +478,7 @@ Goal: confirmed requirement from the project owner for a web dashboard with depl
 
 Decisions already made:
 
-- Architecture: the dashboard imports the same TypeScript orchestration modules the CLI uses. It is not a wrapper around the `deployctl` binary.
+- Architecture: the dashboard imports the same TypeScript orchestration modules the CLI uses. It is not a wrapper around the `deployctl` binary. Adapter wiring is shared through the `src/composition.ts` composition root (`createAdapterProvider(config, runtime)`), so the dashboard selects adapters by `adapterMode` exactly as the CLI does rather than duplicating construction.
 - Lives in the same repository as `deployctl`.
 - v1 scope: backend deploy, frontend deploy, status. Rollback and logs are deferred to a later phase.
 - Concurrency guardrail: reuses the Phase 5 `inProgress` field, no new lock infrastructure.
