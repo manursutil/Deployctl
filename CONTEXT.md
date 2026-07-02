@@ -35,6 +35,7 @@ Current files:
 - `src/core/deploy.ts`: backend deploy orchestration (`deployBackend`) over the `SsmDeployExecutor` seam; wires tenant lookup, ref resolution, the `inProgress` guardrail, and deploy history.
 - `src/core/frontend.ts`: frontend artifact identity (`frontendArtifactKey`/`frontendArtifactStorageKey`) and deploy orchestration (`deployFrontend`) over the `FrontendArtifactStore`, `FrontendBuilder`, `FrontendSync`, and `FrontendSmokeCheck` seams.
 - `src/core/rollback.ts`: backend/frontend rollback orchestration (`rollbackBackend`/`rollbackFrontend`) and version selection (`selectRollbackTarget`) over the same history, guardrail, SSM executor, and frontend sync/smoke-check seams.
+- `src/core/diagnostics.ts`: status query (`getTenantStatus`) over the `DeployHistoryRepository` seam and CLI rendering (`formatTenantStatus`); reports current state per `<env>/<tenant>/<app>` including the `inProgress` guardrail.
 - `src/adapters/git.ts`: Git CLI adapter for resolving refs from the application repository.
 - `src/shared.ts`: shared CLI errors, IO, and formatting helpers.
 - `tenants.yml`: initial tenant registry with resource references only.
@@ -202,6 +203,7 @@ Implemented patterns:
 - SSM Run Command targets are selected per environment via `deployctl.config.yml` `ssmTargets`, a discriminated selector (`mode: instanceIds` with `instanceIds`, or `mode: asg` with `autoScalingGroupName`). Identifiers are placeholders until Phase 0 confirms them; the selector shape is fixed in code.
 - Frontend deploy callers should use `deployFrontend(input)` from `src/core/frontend.ts`, with the same dependency-injection shape (config, registry, ref resolver, history, plus the artifact-store/builder/sync/smoke-check seams). The v1 artifact identity is `frontendArtifactKey`: a fingerprint over the resolved commit and the exact env/tenant/build-variable values, so one tenant's build is never reused for another. Build-variable values are passed in as input; their source is a Phase 0 confirmation kept out of the core. The synced artifact's S3 key is recorded on the deploy event as `artifactStorageKey` so rollback can redeploy the exact artifact.
 - Rollback callers should use `rollbackBackend(input)`/`rollbackFrontend(input)` from `src/core/rollback.ts`, with the same dependency-injection shape as deploy. A rollback never resolves a git ref: `selectRollbackTarget(...)` picks the version to restore from recorded history (default: the version before the current one; or an explicit `toVersion` matching an earlier successful deploy). Backend rollback reuses the `SsmDeployExecutor.runBackendDeploy` seam with the target commit; frontend rollback re-syncs the target version's recorded `artifactStorageKey` without rebuilding.
+- Status callers should use `getTenantStatus(repository, input)` from `src/core/diagnostics.ts` rather than reading current state in command code. It queries the `DeployHistoryRepository` seam for each app and returns a structured `TenantStatus`; `formatTenantStatus(...)` renders it one target per line. The S3-backed repository adapter is still pending, so the CLI controller validates offline and reports that boundary.
 
 Expected implementation conventions from the proposal:
 
@@ -227,7 +229,7 @@ Suggested future module seams, once code exists:
 - Deploy history/current-state repository: core schemas and repository seam are implemented in `src/core/history.ts`; S3 persistence adapter is still pending.
 - Backend SSM deployment orchestration.
 - Frontend artifact and S3 sync orchestration.
-- Status and logs queries.
+- Status and logs queries: status is implemented in `src/core/diagnostics.ts`; logs and the S3 history adapter are still pending.
 - Rollback orchestration: implemented in `src/core/rollback.ts`; CLI controllers and AWS adapters still pending.
 
 These modules must stay directly importable/callable independent of `process.argv` and stdout, since the planned web dashboard (Phase 15) will call them in-process rather than through the CLI binary.
@@ -254,6 +256,7 @@ Current paths:
 - `test/refs.test.ts`: ref resolution policy behavior tests.
 - `test/history.test.ts`: deploy history/current-state behavior tests.
 - `test/rollback.test.ts`: rollback version-selection and backend/frontend rollback behavior tests.
+- `test/diagnostics.test.ts`: status query and rendering behavior tests.
 - `package.json`, `package-lock.json`, `tsconfig.json`: Node package metadata and TypeScript configuration.
 - `deployctl.config.yml`: project-wide config for AWS region, app repository, build commands, deploy history/artifact locations, ref policies, and retention settings. Some values are placeholders until Phase 0 discovery confirms them.
 - `tenants.yml`: tenant registry with environment/tenant resource mappings. Current values are starter references and should be confirmed before real deploy use.

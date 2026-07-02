@@ -62,6 +62,28 @@ test("deployctl tenants list exits non-zero with a clear message for missing ten
   assert.match(result.stderr, /Could not read tenants config at does-not-exist.yml/);
 });
 
+test("deployctl status rejects an unknown tenant before any AWS work", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "src/cli.ts", "status", "--tenant", "ghost", "--env", "staging"],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Tenant not found in staging: ghost/);
+});
+
+test("deployctl status validates inputs and reports that the history adapter is still pending", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", "src/cli.ts", "status", "--tenant", "client1", "--env", "staging"],
+    { encoding: "utf8" },
+  );
+
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /not yet readable/);
+});
+
 test("deployctl deploy backend requires --ref", () => {
   const result = spawnSync(process.execPath, ["--import", "tsx", "src/cli.ts", "deploy", "backend", "--tenant", "client1", "--env", "staging"], {
     encoding: "utf8",
