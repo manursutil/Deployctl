@@ -1,10 +1,5 @@
 #!/usr/bin/env node
-import { DockerSimSsmDeployExecutor } from "./adapters/docker-ssm.js";
-import { FixtureFrontendBuilder, NoopFrontendSmokeCheck } from "./adapters/fixture-frontend.js";
-import { FileSystemDeployHistoryRepository } from "./adapters/filesystem-history.js";
-import { FileSystemFrontendArtifactStore, FileSystemFrontendSync } from "./adapters/filesystem-frontend.js";
-import { FileSystemLogQuery } from "./adapters/filesystem-logs.js";
-import { GitCliRefResolver } from "./adapters/git.js";
+import { createAdapterProvider, runtimeFromEnv } from "./composition.js";
 import { loadDeployctlConfig } from "./core/config.js";
 import { deployBackend } from "./core/deploy.js";
 import { formatTenantStatus, getTenantStatus } from "./core/diagnostics.js";
@@ -119,10 +114,8 @@ async function runStatus(args: string[], io: Io): Promise<number> {
   // Sim Phase 1 (docs/phase-0-simulation-plan.md): adapterMode: sim reads current
   // state from the filesystem history repository instead of the pending S3 adapter.
   if (config.adapterMode === "sim") {
-    // DEPLOYCTL_SIM_ROOT lets tests and demo scripts isolate simulation state;
-    // it defaults to .deployctl-sim in the current working directory.
-    const repository = new FileSystemDeployHistoryRepository(process.env.DEPLOYCTL_SIM_ROOT);
-    const status = await getTenantStatus(repository, { env: environment, tenant });
+    const provider = createAdapterProvider(config, runtimeFromEnv());
+    const status = await getTenantStatus(await provider.history(), { env: environment, tenant });
     io.stdout.write(formatTenantStatus(status));
     return 0;
   }
@@ -157,6 +150,7 @@ async function runDeployBackend(args: string[], io: Io): Promise<number> {
   // deploy through the Docker app-server container instead of the pending SSM
   // executor, using the same deployBackend orchestration as the real path.
   if (config.adapterMode === "sim") {
+    const provider = createAdapterProvider(config, runtimeFromEnv());
     const result = await deployBackend({
       env: environment,
       tenant,
@@ -164,12 +158,9 @@ async function runDeployBackend(args: string[], io: Io): Promise<number> {
       actor: "cli",
       config,
       registry,
-      refResolver: new GitCliRefResolver(),
-      history: new FileSystemDeployHistoryRepository(process.env.DEPLOYCTL_SIM_ROOT),
-      executor: new DockerSimSsmDeployExecutor({
-        releaseRoot: config.backendDeploy.releaseRoot,
-        osUser: config.backendDeploy.osUser,
-      }),
+      refResolver: await provider.refResolver(),
+      history: await provider.history(),
+      executor: await provider.ssmExecutor(),
     });
 
     if (result.status !== "success") {
@@ -214,6 +205,7 @@ async function runDeployFrontend(args: string[], io: Io): Promise<number> {
     // from --tenant/--env to match deployctl.sim.config.yml's identity inputs.
     const buildVariables = { VITE_TENANT: tenant, VITE_ENVIRONMENT: environment };
 
+    const provider = createAdapterProvider(config, runtimeFromEnv());
     const result = await deployFrontend({
       env: environment,
       tenant,
@@ -222,12 +214,12 @@ async function runDeployFrontend(args: string[], io: Io): Promise<number> {
       buildVariables,
       config,
       registry,
-      refResolver: new GitCliRefResolver(),
-      history: new FileSystemDeployHistoryRepository(process.env.DEPLOYCTL_SIM_ROOT),
-      artifacts: new FileSystemFrontendArtifactStore(process.env.DEPLOYCTL_SIM_ROOT),
-      builder: new FixtureFrontendBuilder(),
-      sync: new FileSystemFrontendSync(process.env.DEPLOYCTL_SIM_ROOT),
-      smokeCheck: new NoopFrontendSmokeCheck(),
+      refResolver: await provider.refResolver(),
+      history: await provider.history(),
+      artifacts: await provider.frontendArtifacts(),
+      builder: await provider.frontendBuilder(),
+      sync: await provider.frontendSync(),
+      smokeCheck: await provider.frontendSmokeCheck(),
     });
 
     if (result.status !== "success") {
@@ -274,6 +266,7 @@ async function runRollbackBackend(args: string[], io: Io): Promise<number> {
   // adapters as-is — rollbackBackend uses the same SsmDeployExecutor/history seams
   // as deployBackend, so no new adapters are needed for this mode.
   if (config.adapterMode === "sim") {
+    const provider = createAdapterProvider(config, runtimeFromEnv());
     const result = await rollbackBackend({
       env: environment,
       tenant,
@@ -281,11 +274,8 @@ async function runRollbackBackend(args: string[], io: Io): Promise<number> {
       toVersion,
       config,
       registry,
-      history: new FileSystemDeployHistoryRepository(process.env.DEPLOYCTL_SIM_ROOT),
-      executor: new DockerSimSsmDeployExecutor({
-        releaseRoot: config.backendDeploy.releaseRoot,
-        osUser: config.backendDeploy.osUser,
-      }),
+      history: await provider.history(),
+      executor: await provider.ssmExecutor(),
     });
 
     if (result.status !== "success") {
@@ -325,15 +315,16 @@ async function runRollbackFrontend(args: string[], io: Io): Promise<number> {
   // artifact via the filesystem sync adapter. rollbackFrontend has no builder seam
   // at all, so "never rebuilds on rollback" is structural, not just a convention.
   if (config.adapterMode === "sim") {
+    const provider = createAdapterProvider(config, runtimeFromEnv());
     const result = await rollbackFrontend({
       env: environment,
       tenant,
       actor: "cli",
       toVersion,
       registry,
-      history: new FileSystemDeployHistoryRepository(process.env.DEPLOYCTL_SIM_ROOT),
-      sync: new FileSystemFrontendSync(process.env.DEPLOYCTL_SIM_ROOT),
-      smokeCheck: new NoopFrontendSmokeCheck(),
+      history: await provider.history(),
+      sync: await provider.frontendSync(),
+      smokeCheck: await provider.frontendSmokeCheck(),
     });
 
     if (result.status !== "success") {
@@ -372,8 +363,8 @@ async function runLogs(args: string[], io: Io): Promise<number> {
   // Sim Phase 4 (docs/phase-0-simulation-plan.md): adapterMode: sim reads log
   // entries from the filesystem logs adapter instead of the pending CloudWatch adapter.
   if (config.adapterMode === "sim") {
-    const logs = new FileSystemLogQuery(process.env.DEPLOYCTL_SIM_ROOT);
-    const entries = await getTenantLogs(logs, { env: environment, tenant, service, since });
+    const provider = createAdapterProvider(config, runtimeFromEnv());
+    const entries = await getTenantLogs(await provider.logQuery(), { env: environment, tenant, service, since });
     io.stdout.write(formatLogEntries(entries));
     return 0;
   }
@@ -407,17 +398,15 @@ async function runReconcileBackend(args: string[], io: Io): Promise<number> {
   // current release on every configured instance via the same Docker executor deploy,
   // bringing a replacement container with an empty /opt/sherwood back to desired state.
   if (config.adapterMode === "sim") {
+    const provider = createAdapterProvider(config, runtimeFromEnv());
     const result = await reconcileBackend({
       env: environment,
       tenant,
       actor: "cli",
       config,
       registry,
-      history: new FileSystemDeployHistoryRepository(process.env.DEPLOYCTL_SIM_ROOT),
-      executor: new DockerSimSsmDeployExecutor({
-        releaseRoot: config.backendDeploy.releaseRoot,
-        osUser: config.backendDeploy.osUser,
-      }),
+      history: await provider.history(),
+      executor: await provider.ssmExecutor(),
     });
 
     if (result.status !== "success") {
